@@ -1,0 +1,16 @@
+Package: bluessh
+Version: 1.0.0
+Section: net
+Priority: optional
+Architecture: amd64
+Depends: libgtk-3-0, libglib2.0-0, libsecret-1-0, xdg-utils
+Maintainer: BlueSSH Project <dev@bluessh.io>
+Homepage: https://bluessh.io
+Description: High-performance remote access client
+ BlueSSH is a cross-platform remote access client integrating SSH, SFTP,
+ VNC, and RDP protocols. Features include adaptive compression for minimal
+ bandwidth usage, session recording, clipboard sharing, multi-monitor
+ support, and secure key-based authentication with MFA.
+ .
+ Supported protocols: SSH-2, SFTP v3, RFB 3.8 (VNC), RDP 10.x
+ Platforms: Windows, Ubuntu/Debian, Android

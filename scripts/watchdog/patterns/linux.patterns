@@ -1,0 +1,40 @@
+# Error patterns for Linux/Ubuntu builds
+# Format: regex|description|fix_function_name
+# Lines starting with # are comments
+
+# ─── Shell / System ──────────────────────────────────────────────
+command not found|Missing command|fix_missing_command
+No such file or directory|Missing file or directory|fix_missing_path
+Permission denied|Permission error|fix_permissions
+No space left on device|Disk full|fix_disk_space
+fatal: not a git repository|Not a git repo|fix_not_git_repo
+Cannot create directory.*Permission denied|Cannot mkdir — permission|fix_permissions
+mkdir: cannot create directory|Cannot create directory|fix_mkdir
+
+# ─── Package Manager (APT) ──────────────────────────────────────
+E: Unable to locate package|Package not found in repos|fix_update_repos
+dpkg: error|dpkg error state|fix_dpkg_lock
+Could not get lock|APT lock held by another process|fix_apt_lock
+The following packages have unmet dependencies|Dependency conflict|fix_broken_deps
+is not installed and no candidate|Package not installed, no candidate|fix_update_repos
+
+# ─── Build Tools ─────────────────────────────────────────────────
+error: linker .* not found|Linker not found|fix_install_build_tools
+pkg-config .* not found|pkg-config not found|fix_install_pkgconfig
+cmake.*not found|cmake not found|fix_install_cmake
+cargo: command not found|Cargo not installed|fix_install_rust
+flutter: command not found|Flutter not installed|fix_install_flutter
+javac: .* not found|Java compiler not found|fix_install_java
+
+# ─── Linker Errors ──────────────────────────────────────────────
+undefined reference to.*-l|Undefined reference (missing lib)|fix_linker_error
+cannot find -l|Cannot find library|fix_linker_error
+ld: library not found|Library not found for linking|fix_linker_error
+
+# ─── Python ──────────────────────────────────────────────────────
+ImportError|Python import error|fix_python_deps
+ModuleNotFoundError|Python module missing|fix_python_module
+
+# ─── Node.js / npm ──────────────────────────────────────────────
+npm ERR!|npm error|fix_npm_error
+node: command not found|Node.js not installed|fix_missing_command
