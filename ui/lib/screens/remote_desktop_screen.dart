@@ -171,7 +171,24 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
     });
   }
 
+  /// Sends a key event to the remote session.
+  ///
+  /// System navigation keys (Back, Home, Recent Apps) are intentionally
+  /// NOT forwarded so the Android system can handle them normally.
   void _sendKeyEvent(KeyEvent event) {
+    // Let system navigation keys propagate to the OS — do not consume them.
+    // This ensures Back, Home, and Recent buttons work as expected.
+    // System navigation keys that must NOT be forwarded to the remote session.
+    // Only Back and Escape actually reach Flutter on Android — Home and
+    // Recent Apps are intercepted by the system before Flutter sees them.
+    final systemKeys = <LogicalKeyboardKey>{
+      LogicalKeyboardKey.goBack,    // Android Back button
+      LogicalKeyboardKey.escape,    // Some devices map Escape → Back
+    };
+    if (systemKeys.contains(event.logicalKey)) {
+      return; // Let Flutter / OS handle these keys
+    }
+
     final sessionService = ref.read(sessionServiceProvider);
     final isDown = event is KeyDownEvent;
 
@@ -359,11 +376,13 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
                   ),
                   onPressed: () {
                     setState(() => _isFullscreen = !_isFullscreen);
-                    if (_isFullscreen) {
-                      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
-                    } else {
-                      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-                    }
+                    // Always keep system navigation buttons visible.
+                    // edgeToEdge shows status bar + navigation bar with
+                    // content drawn behind them (preferred over immersive
+                    // which hides the navigation bar entirely).
+                    SystemChrome.setEnabledSystemUIMode(
+                      SystemUiMode.edgeToEdge,
+                    );
                   },
                 ),
               ],
