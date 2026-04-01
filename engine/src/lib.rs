@@ -1017,6 +1017,7 @@ mod jni_exports {
     use jni::objects::{JByteArray, JClass, JString};
     use jni::sys::{jbyteArray, jint, jlong, jstring};
     use jni::JNIEnv;
+    use std::ffi::CString;
 
     /// JNI wrapper: initializes the engine.
     #[no_mangle]
@@ -1215,7 +1216,7 @@ mod jni_exports {
     /// Returns a JSON string array of file entries.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpList(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         session_id: jlong,
         path: JString,
@@ -1263,7 +1264,7 @@ mod jni_exports {
     /// JNI wrapper: uploads a local file to the remote path via SFTP.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpUpload(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         session_id: jlong,
         local_path: JString,
@@ -1291,7 +1292,7 @@ mod jni_exports {
     /// JNI wrapper: downloads a remote file to the local path via SFTP.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpDownload(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         session_id: jlong,
         remote_path: JString,
@@ -1319,7 +1320,7 @@ mod jni_exports {
     /// JNI wrapper: creates a directory via SFTP.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpMkdir(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         session_id: jlong,
         path: JString,
@@ -1338,7 +1339,7 @@ mod jni_exports {
     /// JNI wrapper: deletes a remote file via SFTP.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpDelete(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         session_id: jlong,
         path: JString,
@@ -1357,7 +1358,7 @@ mod jni_exports {
     /// JNI wrapper: renames a remote file via SFTP.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpRename(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         session_id: jlong,
         old_path: JString,

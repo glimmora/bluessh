@@ -399,7 +399,7 @@ class EngineBridge {
 
     final pathPtr = outputPath.toNativeUtf8();
     final passPtr = passphrase.toNativeUtf8();
-    final outBuf = calloc<Utf8>(4096);
+    final outBuf = calloc<Uint8>(4096).cast<Utf8>();
 
     try {
       final result = _engineKeyGenerate(

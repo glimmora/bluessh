@@ -19,6 +19,8 @@ class TabManager extends ChangeNotifier {
   TerminalTab? get activeTab =>
       _tabs.isNotEmpty ? _tabs[_activeIndex] : null;
   int get length => _tabs.length;
+  bool get isEmpty => _tabs.isEmpty;
+  bool get isNotEmpty => _tabs.isNotEmpty;
 
   /// Creates a new tab with an SSH session to the given profile.
   Future<TerminalTab> createTab({
