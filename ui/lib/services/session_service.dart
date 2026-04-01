@@ -65,6 +65,9 @@ class SessionService {
 
   bool _initialized = false;
 
+  /// Count of currently active sessions — drives foreground service.
+  int _activeSessionCount = 0;
+
   // ── Public streams ─────────────────────────────────────────────
 
   /// Broadcast stream of session lifecycle events.
@@ -154,6 +157,8 @@ class SessionService {
 
       if (sessionId != null && sessionId > 0) {
         _startKeepalive(sessionId);
+        _activeSessionCount++;
+        _updateForegroundService();
         return sessionId;
       }
       return 0;
@@ -215,6 +220,8 @@ class SessionService {
   Future<int> disconnect(int sessionId) async {
     _stopKeepalive(sessionId);
     _stopReconnect(sessionId);
+    _activeSessionCount = (_activeSessionCount - 1).clamp(0, 9999);
+    _updateForegroundService();
     try {
       return await _channel.invokeMethod<int>('disconnect', {
             'sessionId': sessionId,
@@ -521,7 +528,27 @@ class SessionService {
     _reconnectTimers.remove(sessionId);
   }
 
-  /// Cancels all timers and closes all event streams.
+  // ── Android Foreground Service ─────────────────────────────────
+
+  /// Starts or stops the Android foreground service based on active sessions.
+  ///
+  /// When at least one session is active, the service shows a persistent
+  /// notification and tells the OS not to kill the process.  When all
+  /// sessions disconnect, the service is stopped.
+  Future<void> _updateForegroundService() async {
+    try {
+      if (_activeSessionCount > 0) {
+        await _channel.invokeMethod('startForeground');
+      } else {
+        await _channel.invokeMethod('stopForeground');
+      }
+    } catch (e) {
+      // Silently ignore on non-Android platforms (desktop uses no service).
+      debugPrint('[SessionService] Foreground service toggle: $e');
+    }
+  }
+
+  /// Cancels all timers, stops the foreground service, and closes streams.
   void dispose() {
     for (final timer in _keepaliveTimers.values) {
       timer.cancel();

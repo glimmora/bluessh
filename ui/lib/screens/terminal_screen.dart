@@ -83,6 +83,18 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     });
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The Android foreground service keeps the process alive while
+    // the app is in the background.  This handler lets us react to
+    // the user returning to the app (resumed) — e.g. to refresh the
+    // terminal or re-sync state.
+    if (state == AppLifecycleState.resumed) {
+      // Terminal data accumulated while backgrounded will be flushed
+      // by the existing stream listener — no action needed.
+    }
+  }
+
   void _listenForData() {
     final sessionService = ref.read(sessionServiceProvider);
     _dataSub = sessionService.terminalData

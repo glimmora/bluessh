@@ -249,6 +249,14 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
                 )
                 "getVersion" -> result.success(nativeGetVersion())
                 "getAppDir" -> result.success(context.filesDir.absolutePath)
+                "startForeground" -> {
+                    SessionForegroundService.start(context)
+                    result.success(0)
+                }
+                "stopForeground" -> {
+                    SessionForegroundService.stop(context)
+                    result.success(0)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
