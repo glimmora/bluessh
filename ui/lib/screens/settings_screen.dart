@@ -9,7 +9,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/session_service.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -25,7 +24,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _autoReconnect = true;
   int _maxReconnectAttempts = 5;
   int _defaultCompression = 2;
-  bool _darkMode = true;
   bool _showTimestamps = false;
   int _terminalFontSize = 14;
   int _keepaliveInterval = 30;
@@ -33,7 +31,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   // Keys management
   final List<KeyInfo> _sshKeys = [];
-  bool _isLoading = true;
 
   @override
   void initState() {
@@ -49,7 +46,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _autoReconnect = prefs.getBool('auto_reconnect') ?? true;
       _maxReconnectAttempts = prefs.getInt('max_reconnect_attempts') ?? 5;
       _defaultCompression = prefs.getInt('default_compression') ?? 2;
-      _darkMode = prefs.getBool('dark_mode') ?? true;
       _showTimestamps = prefs.getBool('show_timestamps') ?? false;
       _terminalFontSize = prefs.getInt('terminal_font_size') ?? 14;
       _keepaliveInterval = prefs.getInt('keepalive_interval') ?? 30;
@@ -67,7 +63,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           createdAt: DateTime.parse(json['createdAt'] as String),
         ));
       }
-      _isLoading = false;
     });
   }
 
