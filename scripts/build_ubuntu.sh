@@ -56,6 +56,23 @@ echo "  Mode:    $BUILD_MODE"
 echo "  Flutter: $FLUTTER"
 echo "═══════════════════════════════════════════════════════════"
 
+# ── Verify Prerequisites ──────────────────────────────────────────
+echo ""
+echo "━━━ Verifying prerequisites ━━━"
+
+if ! command -v cargo &>/dev/null; then
+    echo "ERROR: cargo not found. Install Rust: https://rustup.rs"
+    exit 1
+fi
+
+if ! command -v dpkg-deb &>/dev/null; then
+    echo "  WARNING: dpkg-deb not found — .deb packaging will be skipped"
+fi
+
+echo "  Rust: $(rustc --version 2>/dev/null || echo 'not found')"
+echo "  Cargo: $(cargo --version 2>/dev/null || echo 'not found')"
+echo ""
+
 # ─── Step 1: Build Rust Engine ────────────────────────────────────
 echo ""
 echo "━━━ Step 1: Building Rust engine ━━━"

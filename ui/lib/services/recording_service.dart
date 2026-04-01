@@ -182,7 +182,11 @@ class RecordingService {
   /// Flushes and closes all active recordings.
   void dispose() {
     for (final session in _activeRecordings.values) {
-      session.sink.close();
+      try {
+        session.sink.close();
+      } catch (_) {
+        // Sink may already be closed — ignore
+      }
     }
     _activeRecordings.clear();
   }

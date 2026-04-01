@@ -95,7 +95,7 @@ if not exist "%BUNDLE_DIR%\bluessh.exe" (
 
 REM Create portable ZIP using PowerShell
 set ZIP_FILE=%DIST_DIR%\BlueSSH-windows-x64-%BUILD_MODE%.zip
-echo   Creating ZIP: %~nx0
+echo   Creating ZIP: %ZIP_FILE%
 powershell -NoProfile -Command "Compress-Archive -Path '%BUNDLE_DIR%\*' -DestinationPath '%ZIP_FILE%' -Force"
 if errorlevel 1 (
     echo   WARNING: PowerShell Compress-Archive failed

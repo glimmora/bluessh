@@ -14,6 +14,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import '../models/host_profile.dart' show ProtocolType;
 
 // ═══════════════════════════════════════════════════════════════════
 //  FFI Struct Definitions
@@ -99,21 +100,27 @@ typedef EngineRecordingStopC = Int32 Function(Uint64 sessionId);
 typedef EngineRecordingStop = int Function(int sessionId);
 
 // ═══════════════════════════════════════════════════════════════════
-//  Protocol & State Enums
+//  Protocol Mapping & State Enums
 // ═══════════════════════════════════════════════════════════════════
 
-/// Protocol types for the FFI bridge (subset used on desktop).
-enum ProtocolType {
-  ssh(0),
-  vnc(1),
-  rdp(2);
-
-  final int value;
-  const ProtocolType(this.value);
+/// Maps the UI [ProtocolType] to the engine wire-format integer.
+///
+/// The Rust engine uses: Ssh=0, Vnc=1, Rdp=2.
+/// SFTP is an SSH sub-channel, so it maps to Ssh (0).
+int protocolToEngineValue(ProtocolType p) {
+  switch (p) {
+    case ProtocolType.ssh:
+    case ProtocolType.sftp:
+      return 0;
+    case ProtocolType.vnc:
+      return 1;
+    case ProtocolType.rdp:
+      return 2;
+  }
 }
 
 /// Connection state as reported through the FFI bridge.
-enum SessionConnectionState {
+enum FfiConnectionState {
   connecting,
   authenticating,
   connected,
@@ -122,12 +129,12 @@ enum SessionConnectionState {
 }
 
 /// Session state snapshot used by the FFI bridge stream.
-class SessionState {
+class FfiSessionState {
   final int sessionId;
-  final SessionConnectionState connectionState;
+  final FfiConnectionState connectionState;
   final String? errorMessage;
 
-  const SessionState({
+  const FfiSessionState({
     required this.sessionId,
     required this.connectionState,
     this.errorMessage,
@@ -159,10 +166,10 @@ class EngineBridge {
   late final EngineRecordingStart _engineRecordingStart;
   late final EngineRecordingStop _engineRecordingStop;
 
-  final _stateController = StreamController<SessionState>.broadcast();
+  final _stateController = StreamController<FfiSessionState>.broadcast();
 
   /// Broadcast stream of session state changes.
-  Stream<SessionState> get sessionStates => _stateController.stream;
+  Stream<FfiSessionState> get sessionStates => _stateController.stream;
 
   EngineBridge._() {
     _engine = _loadNativeLibrary();
@@ -230,22 +237,26 @@ class EngineBridge {
     int compressionLevel = 2,
     bool recordSession = false,
   }) {
+    if (host.isEmpty) return 0;
+
     final config = calloc<CSessionConfig>();
     config.ref.host = host.toNativeUtf8();
     config.ref.port = port;
-    config.ref.protocol = protocol.value;
+    config.ref.protocol = protocolToEngineValue(protocol);
     config.ref.compressLevel = compressionLevel;
     config.ref.recordSession = recordSession;
 
     try {
       final sessionId = _engineConnect(config);
       if (sessionId != 0) {
-        _stateController.add(SessionState(
+        _stateController.add(FfiSessionState(
           sessionId: sessionId,
-          connectionState: SessionConnectionState.connecting,
+          connectionState: FfiConnectionState.connecting,
         ));
       }
       return sessionId;
+    } catch (e) {
+      return 0;
     } finally {
       calloc.free(config.ref.host);
       calloc.free(config);
@@ -254,23 +265,30 @@ class EngineBridge {
 
   /// Disconnects the session. Returns `0` on success.
   int disconnect(int sessionId) {
-    final result = _engineDisconnect(sessionId);
-    if (result == 0) {
-      _stateController.add(SessionState(
-        sessionId: sessionId,
-        connectionState: SessionConnectionState.disconnected,
-      ));
+    try {
+      final result = _engineDisconnect(sessionId);
+      if (result == 0) {
+        _stateController.add(FfiSessionState(
+          sessionId: sessionId,
+          connectionState: FfiConnectionState.disconnected,
+        ));
+      }
+      return result;
+    } catch (e) {
+      return -1;
     }
-    return result;
   }
 
   /// Writes a string to the session channel.
   int write(int sessionId, String data) {
+    if (data.isEmpty) return -1;
     final bytes = Uint8List.fromList(data.codeUnits);
     final pointer = calloc<Uint8>(bytes.length);
     pointer.asTypedList(bytes.length).setAll(0, bytes);
     try {
       return _engineWrite(sessionId, pointer, bytes.length);
+    } catch (e) {
+      return -1;
     } finally {
       calloc.free(pointer);
     }
@@ -278,10 +296,13 @@ class EngineBridge {
 
   /// Writes raw bytes to the session channel.
   int writeBytes(int sessionId, Uint8List data) {
+    if (data.isEmpty) return -1;
     final pointer = calloc<Uint8>(data.length);
     pointer.asTypedList(data.length).setAll(0, data);
     try {
       return _engineWrite(sessionId, pointer, data.length);
+    } catch (e) {
+      return -1;
     } finally {
       calloc.free(pointer);
     }
@@ -289,14 +310,22 @@ class EngineBridge {
 
   /// Resizes the terminal to [cols] x [rows].
   int resize(int sessionId, int cols, int rows) {
-    return _engineResize(sessionId, cols, rows);
+    if (cols <= 0 || rows <= 0) return -1;
+    try {
+      return _engineResize(sessionId, cols, rows);
+    } catch (e) {
+      return -1;
+    }
   }
 
   /// Authenticates with a plaintext password.
   int authPassword(int sessionId, String password) {
+    if (password.isEmpty) return -1;
     final pwPtr = password.toNativeUtf8();
     try {
       return _engineAuthPassword(sessionId, pwPtr);
+    } catch (e) {
+      return -1;
     } finally {
       calloc.free(pwPtr);
     }
@@ -304,9 +333,12 @@ class EngineBridge {
 
   /// Authenticates with an SSH key file at the given path.
   int authKey(int sessionId, String keyPath) {
+    if (keyPath.isEmpty) return -1;
     final pathPtr = keyPath.toNativeUtf8();
     try {
       return _engineAuthKey(sessionId, pathPtr);
+    } catch (e) {
+      return -1;
     } finally {
       calloc.free(pathPtr);
     }
@@ -314,9 +346,12 @@ class EngineBridge {
 
   /// Submits a multi-factor authentication code.
   int authMfa(int sessionId, String code) {
+    if (code.isEmpty) return -1;
     final codePtr = code.toNativeUtf8();
     try {
       return _engineAuthMfa(sessionId, codePtr);
+    } catch (e) {
+      return -1;
     } finally {
       calloc.free(codePtr);
     }
@@ -324,9 +359,12 @@ class EngineBridge {
 
   /// Starts recording the session to the given output path.
   int startRecording(int sessionId, String outputPath) {
+    if (outputPath.isEmpty) return -1;
     final pathPtr = outputPath.toNativeUtf8();
     try {
       return _engineRecordingStart(sessionId, pathPtr);
+    } catch (e) {
+      return -1;
     } finally {
       calloc.free(pathPtr);
     }
@@ -334,7 +372,11 @@ class EngineBridge {
 
   /// Stops recording the session.
   int stopRecording(int sessionId) {
-    return _engineRecordingStop(sessionId);
+    try {
+      return _engineRecordingStop(sessionId);
+    } catch (e) {
+      return -1;
+    }
   }
 
   /// Closes the state stream and releases the singleton.

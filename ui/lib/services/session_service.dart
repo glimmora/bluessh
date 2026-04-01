@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/host_profile.dart';
 import '../models/session_state.dart';
+import 'engine_bridge.dart' show protocolToEngineValue;
 
 /// Riverpod provider for the singleton [SessionService] instance.
 final sessionServiceProvider = Provider<SessionService>((ref) {
@@ -150,7 +151,7 @@ class SessionService {
       final sessionId = await _channel.invokeMethod<int>('connect', {
         'host': profile.host,
         'port': profile.port,
-        'protocol': profile.protocol.value,
+        'protocol': protocolToEngineValue(profile.protocol),
         'compressLevel': profile.compressionLevel,
         'recordSession': profile.recordSession,
       });

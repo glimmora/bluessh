@@ -305,7 +305,7 @@ class _FileManagerScreenState extends ConsumerState<FileManagerScreen> {
           // Path bar
           Container(
             padding: const EdgeInsets.all(8),
-            color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+            color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
             child: Row(
               children: [
                 IconButton(
@@ -501,7 +501,7 @@ class _FileListItem extends StatelessWidget {
         width: 40,
         height: 40,
         decoration: BoxDecoration(
-          color: _fileColor().withValues(alpha: 0.15),
+          color: _fileColor().withOpacity(0.15),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(_fileIcon(), color: _fileColor(), size: 20),

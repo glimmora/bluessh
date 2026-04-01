@@ -112,14 +112,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             sessionId: sessionId,
             profile: profile,
           );
-          break;
         case ProtocolType.vnc:
         case ProtocolType.rdp:
           screen = RemoteDesktopScreen(
             sessionId: sessionId,
             profile: profile,
           );
-          break;
       }
 
       Navigator.of(context).push(
@@ -328,7 +326,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 width: 96,
                                 height: 96,
                                 decoration: BoxDecoration(
-                                  color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+                                  color: theme.colorScheme.primaryContainer.withOpacity(0.3),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Icon(
@@ -495,18 +493,16 @@ class _HostCard extends StatelessWidget {
                       width: 44,
                       height: 44,
                       decoration: BoxDecoration(
-                        color: _protocolColor(profile.protocol).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        _protocolIcon(profile.protocol),
-                        color: _protocolColor(profile.protocol),
-                        size: 22,
-                      ),
+color: _protocolColor(profile.protocol).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    const SizedBox(width: 14),
-
-                    const SizedBox(width: 14),
+                    child: Icon(
+                      _protocolIcon(profile.protocol),
+                      color: _protocolColor(profile.protocol),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
 
                     // Host info
                     Expanded(
@@ -541,7 +537,7 @@ class _HostCard extends StatelessWidget {
                                 ),
                                 decoration: BoxDecoration(
                                   color: _protocolColor(profile.protocol)
-                                      .withValues(alpha: 0.12),
+                                      .withOpacity(0.12),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
@@ -558,7 +554,7 @@ class _HostCard extends StatelessWidget {
                                     vertical: 2,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: Colors.teal.withValues(alpha: 0.12),
+                                    color: Colors.teal.withOpacity(0.12),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(

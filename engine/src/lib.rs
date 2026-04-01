@@ -194,29 +194,42 @@ fn engine() -> &'static RwLock<EngineState> {
 ///
 /// Returns `0` on success. Must be called once before any other
 /// `engine_*` function.
+///
+/// Safe to call multiple times; subsequent calls return `0` without
+/// reinitializing.
 #[no_mangle]
 pub extern "C" fn engine_init() -> c_int {
-    tracing_subscriber::fmt()
+    // Use try_init to gracefully handle repeated initialization
+    // (e.g. if called from both FFI and JNI during a hot restart).
+    let _ = tracing_subscriber::fmt()
         .with_env_filter("bluessh=info")
         .json()
-        .init();
+        .try_init();
 
-    let mut state = engine().write().unwrap();
-    state.initialized = true;
-    info!("BlueSSH engine initialized");
-    0
+    match engine().write() {
+        Ok(mut state) => {
+            state.initialized = true;
+            info!("BlueSSH engine initialized");
+            0
+        }
+        Err(_) => -1,
+    }
 }
 
 /// Clears all sessions and marks the engine as shut down.
 ///
-/// Returns `0` on success.
+/// Returns `0` on success, `-1` if the lock is poisoned.
 #[no_mangle]
 pub extern "C" fn engine_shutdown() -> c_int {
-    let mut state = engine().write().unwrap();
-    state.sessions.clear();
-    state.initialized = false;
-    info!("BlueSSH engine shut down");
-    0
+    match engine().write() {
+        Ok(mut state) => {
+            state.sessions.clear();
+            state.initialized = false;
+            info!("BlueSSH engine shut down");
+            0
+        }
+        Err(_) => -1,
+    }
 }
 
 /// Creates a new session from the given configuration.
@@ -229,7 +242,8 @@ pub extern "C" fn engine_shutdown() -> c_int {
 /// # Returns
 ///
 /// A non-zero [`SessionId`] on success, or `0` on failure
-/// (null pointer, invalid UTF-8, or unsupported protocol byte).
+/// (null pointer, invalid UTF-8, unsupported protocol byte,
+///  or lock poisoned).
 #[no_mangle]
 pub unsafe extern "C" fn engine_connect(config: *const CSessionConfig) -> SessionId {
     if config.is_null() {
@@ -238,8 +252,19 @@ pub unsafe extern "C" fn engine_connect(config: *const CSessionConfig) -> Sessio
 
     let cfg = &*config;
 
+    // Validate host pointer is non-null before dereferencing
+    if cfg.host.is_null() {
+        return 0;
+    }
+
     let host = match CStr::from_ptr(cfg.host).to_str() {
-        Ok(h) => h.to_string(),
+        Ok(h) => {
+            let s = h.to_string();
+            if s.is_empty() {
+                return 0;
+            }
+            s
+        }
         Err(_) => return 0,
     };
 
@@ -257,9 +282,16 @@ pub unsafe extern "C" fn engine_connect(config: *const CSessionConfig) -> Sessio
         _ => CompressionLevel::High,
     };
 
-    let mut state = engine().write().unwrap();
+    let mut state = match engine().write() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+
     let session_id = state.next_id;
-    state.next_id += 1;
+    state.next_id = match state.next_id.checked_add(1) {
+        Some(id) => id,
+        None => return 0, // Session ID overflow (extremely unlikely)
+    };
 
     let handle = SessionHandle {
         id: session_id,
@@ -281,16 +313,18 @@ pub unsafe extern "C" fn engine_connect(config: *const CSessionConfig) -> Sessio
 
 /// Disconnects and removes the session identified by `session_id`.
 ///
-/// Returns `0` if the session existed, `-1` if not found.
+/// Returns `0` if the session existed, `-1` if not found or lock poisoned.
 #[no_mangle]
 pub unsafe extern "C" fn engine_disconnect(session_id: SessionId) -> c_int {
-    let mut state = engine().write().unwrap();
-    match state.sessions.remove(&session_id) {
-        Some(_) => {
-            info!(session_id, "Session disconnected");
-            0
-        }
-        None => -1,
+    match engine().write() {
+        Ok(mut state) => match state.sessions.remove(&session_id) {
+            Some(_) => {
+                info!(session_id, "Session disconnected");
+                0
+            }
+            None => -1,
+        },
+        Err(_) => -1,
     }
 }
 
@@ -469,7 +503,10 @@ mod jni_exports {
             Err(_) => return 0,
         };
 
-        let host_cstr = CString::new(host_str).unwrap();
+        let host_cstr = match CString::new(host_str) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
         let config = CSessionConfig {
             host: host_cstr.as_ptr(),
             port: port as u16,
@@ -499,7 +536,13 @@ mod jni_exports {
         session_id: jlong,
         data: JByteArray,
     ) -> jint {
-        let bytes = env.convert_byte_array(&data).unwrap_or_default();
+        let bytes = match env.convert_byte_array(&data) {
+            Ok(b) => b,
+            Err(_) => return -1,
+        };
+        if bytes.is_empty() {
+            return -1;
+        }
         engine_write(session_id as SessionId, bytes.as_ptr(), bytes.len())
     }
 
@@ -512,6 +555,9 @@ mod jni_exports {
         cols: jint,
         rows: jint,
     ) -> jint {
+        if cols <= 0 || rows <= 0 {
+            return -1;
+        }
         engine_resize(session_id as SessionId, cols as u16, rows as u16)
     }
 
@@ -527,7 +573,10 @@ mod jni_exports {
             Ok(s) => s.into(),
             Err(_) => return -1,
         };
-        let pw_cstr = CString::new(pw).unwrap();
+        let pw_cstr = match CString::new(pw) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
         engine_auth_password(session_id as SessionId, pw_cstr.as_ptr())
     }
 
@@ -543,12 +592,15 @@ mod jni_exports {
             Ok(s) => s.into(),
             Err(_) => return -1,
         };
-        let path_cstr = CString::new(path).unwrap();
+        let path_cstr = match CString::new(path) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
         engine_auth_key(session_id as SessionId, path_cstr.as_ptr())
     }
 
     /// JNI wrapper: authenticates with raw key data and a passphrase.
-    /// Not yet implemented — placeholder returns success.
+    /// Not yet implemented — placeholder returns 0.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeAuthKeyData(
         _env: JNIEnv,
@@ -574,7 +626,10 @@ mod jni_exports {
             Ok(s) => s.into(),
             Err(_) => return -1,
         };
-        let mfa_cstr = CString::new(mfa).unwrap();
+        let mfa_cstr = match CString::new(mfa) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
         engine_auth_mfa(session_id as SessionId, mfa_cstr.as_ptr())
     }
 
@@ -583,15 +638,21 @@ mod jni_exports {
     /// Not yet implemented — placeholder returns "[]".
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpList(
-        _env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
         session_id: jlong,
         _path: JString,
     ) -> jstring {
-        // TODO: Execute SFTP readdir and serialize entries as JSON.
+        let _ = session_id;
         let empty_json = "[]".to_string();
-        let output = _env.new_string(empty_json).unwrap();
-        output.into_raw()
+        match env.new_string(empty_json) {
+            Ok(output) => output.into_raw(),
+            Err(_) => {
+                // Return empty string on failure — JNI callers expect non-null
+                let fallback = env.new_string("").unwrap_or_default();
+                fallback.into_raw()
+            }
+        }
     }
 
     /// JNI wrapper: uploads a local file to the remote path via SFTP.
@@ -680,8 +741,10 @@ mod jni_exports {
         session_id: jlong,
     ) -> jbyteArray {
         let _ = session_id;
-        let empty = env.byte_array_from_slice(&[]).unwrap();
-        empty.into_raw()
+        match env.byte_array_from_slice(&[]) {
+            Ok(empty) => empty.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
     }
 
     /// JNI wrapper: starts session recording to the given file path.
@@ -696,7 +759,10 @@ mod jni_exports {
             Ok(s) => s.into(),
             Err(_) => return -1,
         };
-        let path_cstr = CString::new(output_path).unwrap();
+        let path_cstr = match CString::new(output_path) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
         engine_recording_start(session_id as SessionId, path_cstr.as_ptr())
     }
 
@@ -718,6 +784,9 @@ mod jni_exports {
         session_id: jlong,
         level: jint,
     ) -> jint {
+        if level < 0 || level > 3 {
+            return -1;
+        }
         info!(
             session_id,
             compression_level = level,
@@ -734,8 +803,13 @@ mod jni_exports {
         session_id: jlong,
     ) -> jstring {
         let state_json = format!("{{\"sessionId\":{},\"status\":\"connected\"}}", session_id);
-        let output = env.new_string(state_json).unwrap();
-        output.into_raw()
+        match env.new_string(state_json) {
+            Ok(output) => output.into_raw(),
+            Err(_) => {
+                let fallback = env.new_string("{}").unwrap_or_default();
+                fallback.into_raw()
+            }
+        }
     }
 
     /// JNI wrapper: returns the engine package version string.
@@ -745,7 +819,12 @@ mod jni_exports {
         _class: JClass,
     ) -> jstring {
         let version = env!("CARGO_PKG_VERSION");
-        let output = env.new_string(version).unwrap();
-        output.into_raw()
+        match env.new_string(version) {
+            Ok(output) => output.into_raw(),
+            Err(_) => {
+                let fallback = env.new_string("unknown").unwrap_or_default();
+                fallback.into_raw()
+            }
+        }
     }
 }

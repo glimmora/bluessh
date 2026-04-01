@@ -467,7 +467,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.15),
+                    color: Colors.green.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(Icons.key, color: Colors.green, size: 20),

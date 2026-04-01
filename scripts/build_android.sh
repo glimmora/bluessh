@@ -105,6 +105,9 @@ check_command() {
 check_command cargo
 check_command rustup
 
+echo "  Rust: $(rustc --version 2>/dev/null || echo 'not found')"
+echo "  Cargo: $(cargo --version 2>/dev/null || echo 'not found')"
+
 # Check cargo-ndk
 if ! cargo ndk --version &>/dev/null 2>&1; then
     echo "Installing cargo-ndk..."
@@ -116,16 +119,22 @@ if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
     if [[ -n "${ANDROID_HOME:-}" ]]; then
         NDK_BASE="$ANDROID_HOME/ndk"
         if [[ -d "$NDK_BASE" ]]; then
-            export ANDROID_NDK_HOME="$(ls -d "$NDK_BASE"/*/ 2>/dev/null | sort -V | tail -1)"
+            NDK_LATEST=$(ls -d "$NDK_BASE"/*/ 2>/dev/null | sort -V | tail -1)
+            if [[ -n "$NDK_LATEST" ]]; then
+                export ANDROID_NDK_HOME="$NDK_LATEST"
+            fi
         fi
     fi
 fi
 
 if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
     echo "WARNING: ANDROID_NDK_HOME not set. Trying cargo-ndk default lookup."
+    echo "  Set ANDROID_NDK_HOME=/path/to/ndk for reliable builds."
 else
-    echo "NDK: $ANDROID_NDK_HOME"
+    echo "  NDK: $ANDROID_NDK_HOME"
 fi
+
+echo ""
 
 # ─── Step 1: Build Rust Engine for each ABI ─────────────────────────
 echo ""

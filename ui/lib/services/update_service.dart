@@ -89,17 +89,23 @@ class UpdateService {
 
   /// Compares two semantic version strings (e.g. "1.2.3").
   /// Returns `true` if [remote] is strictly newer than [current].
+  /// Returns `false` if either version string is malformed.
   bool _isVersionNewer(String remote, String current) {
-    final remoteParts = remote.split('.').map(int.parse).toList();
-    final currentParts = current.split('.').map(int.parse).toList();
+    try {
+      final remoteParts = remote.split('.').map(int.parse).toList();
+      final currentParts = current.split('.').map(int.parse).toList();
 
-    for (int i = 0; i < 3; i++) {
-      final r = i < remoteParts.length ? remoteParts[i] : 0;
-      final c = i < currentParts.length ? currentParts[i] : 0;
-      if (r > c) return true;
-      if (r < c) return false;
+      for (int i = 0; i < 3; i++) {
+        final r = i < remoteParts.length ? remoteParts[i] : 0;
+        final c = i < currentParts.length ? currentParts[i] : 0;
+        if (r > c) return true;
+        if (r < c) return false;
+      }
+      return false;
+    } on FormatException {
+      debugPrint('[UpdateService] Version parse error: remote=$remote, current=$current');
+      return false;
     }
-    return false;
   }
 
   /// Releases the underlying HTTP client.

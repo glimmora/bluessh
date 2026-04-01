@@ -296,7 +296,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         backgroundOpacity: 0.95,
         theme: TerminalTheme(
           cursor: Colors.lightBlueAccent,
-          selection: Colors.blue.withValues(alpha: 0.3),
+          selection: Colors.blue.withOpacity(0.3),
           foreground: Colors.white,
           background: const Color(0xFF1E1E2E),
           black: Colors.black,
