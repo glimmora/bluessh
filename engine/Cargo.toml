@@ -39,6 +39,9 @@ totp-rs = "5"
 # Random number generation
 rand = "0.8"
 
+# Time utilities
+chrono = "0.4"
+
 # Error handling
 anyhow = "1"
 

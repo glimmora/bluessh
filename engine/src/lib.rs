@@ -31,6 +31,7 @@ mod tests;
 
 use std::collections::HashMap;
 use std::ffi::CStr;
+use std::io::Write;
 use std::os::raw::{c_char, c_int};
 use std::sync::{OnceLock, RwLock};
 
@@ -167,6 +168,15 @@ struct SessionHandle {
     command_tx: Option<std::sync::mpsc::Sender<ssh_session::SessionCommand>>,
     /// Channel to receive events from the SSH session.
     event_rx: Option<std::sync::Mutex<std::sync::mpsc::Receiver<ssh_session::SessionEvent>>>,
+    /// Recording file writer (Some = actively recording).
+    recording: Option<SessionRecorder>,
+}
+
+/// Manages an asciinema v2 format recording file.
+struct SessionRecorder {
+    path: String,
+    start_time: std::time::Instant,
+    writer: std::io::BufWriter<std::fs::File>,
 }
 
 /// Internal session configuration stored after FFI parsing.
@@ -329,6 +339,7 @@ pub unsafe extern "C" fn engine_connect(config: *const CSessionConfig) -> Sessio
         },
         command_tx: None,
         event_rx: None,
+        recording: None,
     };
 
     state.sessions.insert(session_id, handle);
@@ -588,7 +599,11 @@ pub unsafe extern "C" fn engine_auth_password(
 
 /// Authenticates a session using a private key file at the given path.
 ///
-/// Returns `0` on success, `-1` if the pointer is null or invalid UTF-8.
+/// Loads the key, authenticates via `authenticate_publickey`, and spawns
+/// the SSH session I/O loop on success.
+///
+/// Returns `0` on success, `-1` if the pointer is null, invalid UTF-8,
+/// or authentication fails.
 #[no_mangle]
 pub unsafe extern "C" fn engine_auth_key(session_id: SessionId, key_path: *const c_char) -> c_int {
     if key_path.is_null() {
@@ -600,8 +615,74 @@ pub unsafe extern "C" fn engine_auth_key(session_id: SessionId, key_path: *const
         Err(_) => return -1,
     };
 
-    info!(session_id, path, "Key auth submitted");
-    0
+    // Get session config
+    let (host, port, username) = {
+        let state = match engine().read() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        match state.sessions.get(&session_id) {
+            Some(handle) => (
+                handle.config.host.clone(),
+                handle.config.port,
+                handle.config.username.clone(),
+            ),
+            None => return -1,
+        }
+    };
+
+    let ssh_config = ssh_session::SshConfig {
+        host: host.clone(),
+        port,
+        username: username.clone(),
+        password: None,
+        key_path: Some(path.clone()),
+        passphrase: None,
+        timeout_secs: 30,
+    };
+
+    match runtime::block_on(ssh_session::connect_ssh(ssh_config)) {
+        Ok(handle) => {
+            let mut state = match engine().write() {
+                Ok(s) => s,
+                Err(_) => return -1,
+            };
+            if let Some(session) = state.sessions.get_mut(&session_id) {
+                let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
+                let (event_tx, event_rx) = std::sync::mpsc::channel();
+
+                let unbounded_tx = handle.command_tx;
+                let mut unbounded_rx = handle.event_rx;
+
+                std::thread::spawn(move || {
+                    while let Ok(cmd) = cmd_rx.recv() {
+                        if unbounded_tx.send(cmd).is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                std::thread::spawn(move || {
+                    while let Some(event) = runtime::runtime().block_on(unbounded_rx.recv()) {
+                        if event_tx.send(event).is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                session.command_tx = Some(cmd_tx);
+                session.event_rx = Some(std::sync::Mutex::new(event_rx));
+                session.state = SessionState::Connected;
+            }
+
+            info!(session_id, "SSH authenticated via key");
+            0
+        }
+        Err(e) => {
+            tracing::error!(session_id, "SSH key auth failed: {e}");
+            -1
+        }
+    }
 }
 
 /// Submits a multi-factor authentication code (e.g. TOTP).
@@ -628,7 +709,9 @@ pub unsafe extern "C" fn engine_auth_mfa(session_id: SessionId, code: *const c_c
 
 /// Starts recording the session output to the file at `path`.
 ///
-/// Returns `0` on success, `-1` if the pointer is null.
+/// Writes an asciinema v2 format header followed by timestamped
+/// output lines.  Returns `0` on success, `-1` if the pointer is
+/// null or the file cannot be created.
 #[no_mangle]
 pub unsafe extern "C" fn engine_recording_start(
     session_id: SessionId,
@@ -643,8 +726,51 @@ pub unsafe extern "C" fn engine_recording_start(
         Err(_) => return -1,
     };
 
-    info!(session_id, output_path, "Recording started");
-    0
+    let file = match std::fs::File::create(&output_path) {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::error!(session_id, "Failed to create recording file: {e}");
+            return -1;
+        }
+    };
+
+    let mut writer = std::io::BufWriter::new(file);
+
+    // asciinema v2 header
+    let header = serde_json::json!({
+        "version": 2,
+        "width": 80,
+        "height": 24,
+        "timestamp": chrono::Utc::now().timestamp(),
+        "env": { "TERM": "xterm-256color" }
+    });
+
+    if let Err(e) = writeln!(writer, "{}", header) {
+        tracing::error!(session_id, "Failed to write recording header: {e}");
+        return -1;
+    }
+
+    if let Err(e) = writer.flush() {
+        tracing::error!(session_id, "Failed to flush recording header: {e}");
+        return -1;
+    }
+
+    let mut state = match engine().write() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    if let Some(session) = state.sessions.get_mut(&session_id) {
+        session.recording = Some(SessionRecorder {
+            path: output_path.clone(),
+            start_time: std::time::Instant::now(),
+            writer,
+        });
+        info!(session_id, output_path, "Recording started");
+        0
+    } else {
+        -1
+    }
 }
 
 /// Stops recording for the given session.
@@ -652,8 +778,47 @@ pub unsafe extern "C" fn engine_recording_start(
 /// Returns `0` on success.
 #[no_mangle]
 pub unsafe extern "C" fn engine_recording_stop(session_id: SessionId) -> c_int {
-    info!(session_id, "Recording stopped");
-    0
+    let mut state = match engine().write() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    if let Some(session) = state.sessions.get_mut(&session_id) {
+        if let Some(mut recorder) = session.recording.take() {
+            let path = recorder.path;
+            if let Err(e) = recorder.writer.flush() {
+                tracing::error!(session_id, "Failed to flush recording: {e}");
+            }
+            info!(session_id, path, "Recording stopped");
+        }
+        0
+    } else {
+        -1
+    }
+}
+
+/// Appends terminal data to the active recording for the given session.
+///
+/// Called internally by the engine when terminal output arrives.
+fn record_data(session_id: SessionId, data: &[u8]) {
+    let mut state = match engine().write() {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    if let Some(session) = state.sessions.get_mut(&session_id) {
+        if let Some(ref mut recorder) = session.recording {
+            let elapsed = recorder.start_time.elapsed().as_secs_f64();
+            // Escape any double quotes and backslashes in the data
+            let escaped = String::from_utf8_lossy(data)
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t");
+            let _ = writeln!(recorder.writer, "[{elapsed:.6}, \"o\", \"{escaped}\"]");
+        }
+    }
 }
 
 /// Generates an SSH key pair and writes to disk.

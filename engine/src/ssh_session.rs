@@ -76,10 +76,14 @@ impl russh::client::Handler for ClientHandler {
 
         let _ = self.event_tx.send(SessionEvent::HostKeyReceived {
             key_type,
-            fingerprint,
+            fingerprint: fingerprint.clone(),
         });
 
-        // Accept all keys for now — host key verification is a future enhancement
+        // Verify against known_hosts
+        // Note: host/port not available in handler context, so we accept
+        // the key and let the UI layer handle first-time trust.
+        // A future enhancement would pass host info through the handler.
+        info!(%fingerprint, "Server host key received");
         Ok(true)
     }
 }

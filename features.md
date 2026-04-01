@@ -10,8 +10,8 @@
 ## 2. Authentication Methods
 
 - **Password authentication** — Plaintext password auth with automatic zeroization after use.
-- **SSH key file** — Authenticate using an existing private key file on disk.
-- **SSH key data (Android)** — Raw key bytes written to a temporary file with `chmod 600`, authenticated, then cleaned up.
+- **SSH key file** — Authenticate using an existing private key file on disk. Loads key via `russh::keys::load_secret_key`, authenticates with `authenticate_publickey`.
+- **SSH key data (Android)** — Raw key bytes written to a temporary file with `chmod 600`, authenticated via `engine_auth_key`, then cleaned up.
 - **MFA / TOTP** — Time-based one-time password generation from a base32 shared secret (SHA1, 6-digit code, 30-second period).
 - **MFA secret storage** — TOTP shared secrets stored encrypted in the host profile via secure storage.
 
@@ -24,7 +24,7 @@
 
 ## 4. Session Recording & Playback
 
-- **Terminal recording** — Saves terminal sessions to `.cast` files in asciinema v2 JSON format.
+- **Terminal recording** — Saves terminal sessions to `.cast` files in asciinema v2 JSON format. Writes header with version/width/height/timestamp/env, then timestamped output lines `[elapsed, "o", "data"]`. Writes header with version/width/height/timestamp/env, then timestamped output lines `[elapsed, "o", "data"]`.
 - **VNC / RDP recording** — Saves graphical sessions to `.vnc-rec` / `.rdp-rec` files.
 - **Recording playback** — Parses asciinema v2 JSON; play / pause / stop controls with line-by-line playback at 50 ms intervals.
 - **Record by default** — Global setting to auto-start recording for all new sessions.
@@ -105,7 +105,7 @@
 - **Host key storage** — `HashMap` keyed by `[host]:port`, persisted to `known_hosts.json`.
 - **Key verification** — Returns match / no-entry / mismatch to detect MITM attacks.
 - **Key acceptance** — Called after user approves a new host key.
-- **Host key events** — Emits key type and SHA-256 fingerprint for UI display.
+- **Host key events** — Emits key type and SHA-256 fingerprint for UI display. Server key accepted by default (russh `check_server_key` returns `Ok(true)`); known_hosts module available for future strict verification. Server key accepted by default (russh `check_server_key` returns `Ok(true)`); known_hosts module available for future strict verification.
 
 ## 14. SFTP File Manager
 
