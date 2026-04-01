@@ -11,13 +11,16 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/host_profile.dart';
 import '../models/session_state.dart';
 import 'engine_bridge.dart' show protocolToEngineValue;
 
 /// Riverpod provider for the singleton [SessionService] instance.
 final sessionServiceProvider = Provider<SessionService>((ref) {
-  return SessionService();
+  final service = SessionService();
+  ref.onDispose(() => service.dispose());
+  return service;
 });
 
 /// Riverpod provider tracking all active session states, keyed by session ID.
@@ -33,7 +36,8 @@ final transferProgressProvider =
 );
 
 /// Interval between keep-alive pings sent to the remote server.
-const Duration _keepaliveInterval = Duration(seconds: 30);
+/// Default 30s — overridden by user's 'keepalive_interval' setting.
+Duration _keepaliveInterval = const Duration(seconds: 30);
 
 /// Interval between reconnection attempts.
 const Duration _reconnectInterval = Duration(seconds: 5);
@@ -447,10 +451,16 @@ class SessionService {
 
   void _startKeepalive(int sessionId) {
     _stopKeepalive(sessionId);
-    _keepaliveTimers[sessionId] = Timer.periodic(
-      _keepaliveInterval,
-      (_) => _sendKeepalive(sessionId),
-    );
+
+    // Read interval from user settings
+    SharedPreferences.getInstance().then((prefs) {
+      final seconds = prefs.getInt('keepalive_interval') ?? 30;
+      _keepaliveInterval = Duration(seconds: seconds);
+      _keepaliveTimers[sessionId] = Timer.periodic(
+        _keepaliveInterval,
+        (_) => _sendKeepalive(sessionId),
+      );
+    });
   }
 
   void _stopKeepalive(int sessionId) {
@@ -484,50 +494,57 @@ class SessionService {
     _stopReconnect(sessionId);
     int attempts = 0;
 
-    _reconnectTimers[sessionId] = Timer.periodic(
-      _reconnectInterval,
-      (timer) async {
-        if (attempts >= maxAttempts) {
-          timer.cancel();
-          _reconnectTimers.remove(sessionId);
-          _eventController.add(SessionEvent(
-            sessionId: sessionId,
-            type: 'reconnect_failed',
-            data: {'attempts': attempts},
-          ));
-          return;
-        }
+    void scheduleNext() {
+      if (attempts >= maxAttempts) {
+        _reconnectTimers.remove(sessionId);
+        _eventController.add(SessionEvent(
+          sessionId: sessionId,
+          type: 'reconnect_failed',
+          data: {'attempts': attempts},
+        ));
+        return;
+      }
 
-        attempts++;
-        final backoffSeconds = 1 << attempts.clamp(0, _maxBackoffExponent);
-        debugPrint(
-          '[SessionService] Reconnect attempt $attempts for session '
-          '$sessionId (backoff: ${backoffSeconds}s)',
-        );
+      attempts++;
+      final backoffSeconds = 1 << (attempts - 1).clamp(0, _maxBackoffExponent);
+      debugPrint(
+        '[SessionService] Reconnect attempt $attempts for session '
+        '$sessionId in ${backoffSeconds}s',
+      );
 
-        try {
-          final newSessionId = await connect(profile);
-          if (newSessionId > 0) {
-            timer.cancel();
-            _reconnectTimers.remove(sessionId);
-            final authResult = await authenticate(newSessionId, profile);
-            if (authResult == 0) {
-              _eventController.add(SessionEvent(
-                sessionId: newSessionId,
-                type: 'reconnected',
-                data: {
-                  'oldSessionId': sessionId,
-                  'attempts': attempts,
-                },
-              ));
+      _reconnectTimers[sessionId] = Timer(
+        Duration(seconds: backoffSeconds),
+        () async {
+          try {
+            final newSessionId = await connect(profile);
+            if (newSessionId > 0) {
+              _reconnectTimers.remove(sessionId);
+              final authResult = await authenticate(newSessionId, profile);
+              if (authResult == 0) {
+                _eventController.add(SessionEvent(
+                  sessionId: newSessionId,
+                  type: 'reconnected',
+                  data: {
+                    'oldSessionId': sessionId,
+                    'attempts': attempts,
+                  },
+                ));
+              } else {
+                scheduleNext();
+              }
+            } else {
+              scheduleNext();
             }
+          } catch (e) {
+            debugPrint(
+                '[SessionService] Reconnect attempt $attempts failed: $e');
+            scheduleNext();
           }
-        } catch (e) {
-          debugPrint(
-              '[SessionService] Reconnect attempt $attempts failed: $e');
-        }
-      },
-    );
+        },
+      );
+    }
+
+    scheduleNext();
   }
 
   void _stopReconnect(int sessionId) {

@@ -233,24 +233,71 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
   }
 
   int _mapKeyCode(LogicalKeyboardKey key) {
-    // Simplified key mapping — full implementation would cover all keys
+    // X11 keysym mapping for VNC/RDP
+
+    // Basic keys
     if (key == LogicalKeyboardKey.enter) return 0xFF0D;
     if (key == LogicalKeyboardKey.backspace) return 0xFF08;
     if (key == LogicalKeyboardKey.tab) return 0xFF09;
     if (key == LogicalKeyboardKey.escape) return 0xFF1B;
     if (key == LogicalKeyboardKey.delete) return 0xFFFF;
+    if (key == LogicalKeyboardKey.insert) return 0xFF63;
+    if (key == LogicalKeyboardKey.space) return 0x0020;
+
+    // Arrow keys
     if (key == LogicalKeyboardKey.arrowUp) return 0xFF52;
     if (key == LogicalKeyboardKey.arrowDown) return 0xFF54;
     if (key == LogicalKeyboardKey.arrowLeft) return 0xFF51;
     if (key == LogicalKeyboardKey.arrowRight) return 0xFF53;
+
+    // Navigation
     if (key == LogicalKeyboardKey.home) return 0xFF50;
     if (key == LogicalKeyboardKey.end) return 0xFF57;
+    if (key == LogicalKeyboardKey.pageUp) return 0xFF55;
+    if (key == LogicalKeyboardKey.pageDown) return 0xFF56;
 
-    // Function keys
+    // Modifier keys
+    if (key == LogicalKeyboardKey.shiftLeft || key == LogicalKeyboardKey.shiftRight) return 0xFFE1;
+    if (key == LogicalKeyboardKey.controlLeft || key == LogicalKeyboardKey.controlRight) return 0xFFE3;
+    if (key == LogicalKeyboardKey.altLeft || key == LogicalKeyboardKey.altRight) return 0xFFE9;
+    if (key == LogicalKeyboardKey.metaLeft || key == LogicalKeyboardKey.metaRight) return 0xFFEB;
+    if (key == LogicalKeyboardKey.capsLock) return 0xFFE5;
+
+    // Special combinations
+    if (key == LogicalKeyboardKey.printScreen) return 0xFF61;
+    if (key == LogicalKeyboardKey.scrollLock) return 0xFF14;
+    if (key == LogicalKeyboardKey.pause) return 0xFF13;
+    if (key == LogicalKeyboardKey.numLock) return 0xFF7F;
+
+    // Function keys F1-F12
     if (key.keyId >= LogicalKeyboardKey.f1.keyId &&
         key.keyId <= LogicalKeyboardKey.f12.keyId) {
       return 0xFFBE + (key.keyId - LogicalKeyboardKey.f1.keyId);
     }
+
+    // Function keys F13-F24
+    if (key.keyId >= LogicalKeyboardKey.f13.keyId &&
+        key.keyId <= LogicalKeyboardKey.f24.keyId) {
+      return 0xFFC1 + (key.keyId - LogicalKeyboardKey.f13.keyId);
+    }
+
+    // Numpad
+    if (key == LogicalKeyboardKey.numpad0) return 0xFFB0;
+    if (key == LogicalKeyboardKey.numpad1) return 0xFFB1;
+    if (key == LogicalKeyboardKey.numpad2) return 0xFFB2;
+    if (key == LogicalKeyboardKey.numpad3) return 0xFFB3;
+    if (key == LogicalKeyboardKey.numpad4) return 0xFFB4;
+    if (key == LogicalKeyboardKey.numpad5) return 0xFFB5;
+    if (key == LogicalKeyboardKey.numpad6) return 0xFFB6;
+    if (key == LogicalKeyboardKey.numpad7) return 0xFFB7;
+    if (key == LogicalKeyboardKey.numpad8) return 0xFFB8;
+    if (key == LogicalKeyboardKey.numpad9) return 0xFFB9;
+    if (key == LogicalKeyboardKey.numpadAdd) return 0xFFAB;
+    if (key == LogicalKeyboardKey.numpadSubtract) return 0xFFAD;
+    if (key == LogicalKeyboardKey.numpadMultiply) return 0xFFAA;
+    if (key == LogicalKeyboardKey.numpadDivide) return 0xFFAF;
+    if (key == LogicalKeyboardKey.numpadDecimal) return 0xFFAE;
+    if (key == LogicalKeyboardKey.numpadEnter) return 0xFF8D;
 
     // Printable characters
     final char = key.keyLabel;
@@ -281,6 +328,25 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
       _scale = 1.0;
       _panOffset = Offset.zero;
     });
+  }
+
+  Future<void> _pasteToRemote() async {
+    final data = await Clipboard.getData('text/plain');
+    if (data?.text != null) {
+      final bytes = Uint8List.fromList(data!.text!.codeUnits);
+      await ref.read(sessionServiceProvider).clipboardSet(
+            widget.sessionId,
+            bytes,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Pasted to remote'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    }
   }
 
   void _fitToScreen() {
@@ -357,6 +423,13 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
                   tooltip: _clipboardSync ? 'Clipboard sync on' : 'Clipboard sync off',
                   onPressed: () =>
                       setState(() => _clipboardSync = !_clipboardSync),
+                ),
+
+                // Paste local clipboard to remote
+                IconButton(
+                  icon: const Icon(Icons.paste),
+                  tooltip: 'Paste to remote',
+                  onPressed: _pasteToRemote,
                 ),
 
                 // Recording

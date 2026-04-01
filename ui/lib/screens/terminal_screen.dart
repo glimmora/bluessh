@@ -106,42 +106,61 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     final sessionService = ref.read(sessionServiceProvider);
     _dataSub = sessionService.terminalData
         .where((e) => e.sessionId == widget.sessionId)
-        .listen((event) {
-      final text = utf8.decode(event.data, allowMalformed: true);
-      _terminal.write(text);
-      setState(() {
-        _bytesReceived += event.data.length;
-      });
-    });
+        .listen(
+      (event) {
+        try {
+          final text = utf8.decode(event.data, allowMalformed: true);
+          _terminal.write(text);
+          setState(() {
+            _bytesReceived += event.data.length;
+          });
+        } catch (e) {
+          // Skip malformed data, don't terminate subscription
+        }
+      },
+      onError: (error) {
+        debugPrint('[Terminal] Data stream error: $error');
+      },
+    );
 
     sessionService.events
         .where((e) => e.sessionId == widget.sessionId)
-        .listen((event) {
-      if (event.type == 'disconnected') {
-        _terminal.write('\r\n\x1b[31m--- Connection lost ---\x1b[0m\r\n');
-      } else if (event.type == 'reconnected') {
-        _terminal.write(
-            '\r\n\x1b[32m--- Reconnected (attempt ${event.data['attempts']}) ---\x1b[0m\r\n');
-      } else if (event.type == 'keepalive_failed') {
-        _terminal.write('\r\n\x1b[33m--- Connection unstable ---\x1b[0m\r\n');
-      }
-    });
+        .listen(
+      (event) {
+        if (event.type == 'disconnected') {
+          _terminal.write('\r\n\x1b[31m--- Connection lost ---\x1b[0m\r\n');
+        } else if (event.type == 'reconnected') {
+          _terminal.write(
+              '\r\n\x1b[32m--- Reconnected (attempt ${event.data['attempts']}) ---\x1b[0m\r\n');
+        } else if (event.type == 'keepalive_failed') {
+          _terminal.write('\r\n\x1b[33m--- Connection unstable ---\x1b[0m\r\n');
+        }
+      },
+      onError: (error) {
+        debugPrint('[Terminal] Event stream error: $error');
+      },
+    );
   }
 
   void _listenForClipboard() {
     final sessionService = ref.read(sessionServiceProvider);
     _clipboardSub = sessionService.clipboardEvents
         .where((e) => e.sessionId == widget.sessionId)
-        .listen((event) {
-      final text = utf8.decode(event.data, allowMalformed: true);
-      Clipboard.setData(ClipboardData(text: text));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Remote clipboard copied'),
-          duration: Duration(seconds: 1),
-        ),
-      );
-    });
+        .listen(
+      (event) {
+        final text = utf8.decode(event.data, allowMalformed: true);
+        Clipboard.setData(ClipboardData(text: text));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Remote clipboard copied'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      },
+      onError: (error) {
+        debugPrint('[Terminal] Clipboard stream error: $error');
+      },
+    );
   }
 
   void _sendInput(String data) {
@@ -182,6 +201,23 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     final data = await Clipboard.getData('text/plain');
     if (data?.text != null) {
       _sendInput(data!.text!);
+    }
+  }
+
+  void _copySelection() {
+    // Copy selected text from terminal
+    final selection = _controller.selection;
+    if (selection != null) {
+      final selectedText = _terminal.buffer.getText(selection);
+      if (selectedText.isNotEmpty) {
+        Clipboard.setData(ClipboardData(text: selectedText));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Copied to clipboard'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
     }
   }
 
@@ -303,6 +339,8 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
         const SingleActivator(LogicalKeyboardKey.escape): () {
           if (_showSearch) _toggleSearch();
         },
+        const SingleActivator(LogicalKeyboardKey.keyC, control: true, shift: true): _copySelection,
+        const SingleActivator(LogicalKeyboardKey.keyV, control: true, shift: true): _sendClipboard,
       },
       child: Focus(
         autofocus: false,

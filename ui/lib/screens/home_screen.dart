@@ -25,7 +25,8 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with WidgetsBindingObserver {
   List<HostProfile> _profiles = [];
   bool _isLoading = true;
   String _searchQuery = '';
@@ -34,13 +35,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadProfiles();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _searchController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      // Disconnect all active sessions when app is closing
+      final sessionService = ref.read(sessionServiceProvider);
+      final activeSessions = ref.read(activeSessionsProvider);
+      for (final sessionId in activeSessions.keys) {
+        sessionService.disconnect(sessionId);
+      }
+      ref.read(activeSessionsProvider.notifier).clear();
+    }
   }
 
   Future<void> _loadProfiles() async {
@@ -860,6 +876,13 @@ class _AddHostSheetState extends State<_AddHostSheet> {
                     labelText: 'Username',
                     prefixIcon: Icon(Icons.person_outline),
                   ),
+                  validator: (v) {
+                    if (_protocol != ProtocolType.vnc &&
+                        (v == null || v.trim().isEmpty)) {
+                      return 'Username is required for ${_protocol.label}';
+                    }
+                    return null;
+                  },
                 ),
               if (_protocol != ProtocolType.vnc) const SizedBox(height: 12),
 

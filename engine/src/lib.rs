@@ -1148,19 +1148,48 @@ mod jni_exports {
         engine_auth_key(session_id as SessionId, path_cstr.as_ptr())
     }
 
-    /// JNI wrapper: authenticates with raw key data and a passphrase.
-    /// Not yet implemented — placeholder returns 0.
+    /// JNI wrapper: authenticates with raw key data.
+    /// Writes key data to a temp file and calls engine_auth_key.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeAuthKeyData(
-        _env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         session_id: jlong,
-        _key_data: JByteArray,
+        key_data: JByteArray,
         _passphrase: JString,
     ) -> jint {
-        // TODO: Deserialize key bytes and forward to SSH key auth handler.
-        info!(session_id, "Key data auth attempted");
-        0
+        let bytes = match env.convert_byte_array(&key_data) {
+            Ok(b) if !b.is_empty() => b,
+            _ => return -1,
+        };
+
+        // Write key to temp file
+        let tmp_path = format!("/tmp/bluessh_key_{}_{}", session_id, uuid::Uuid::new_v4());
+        if std::fs::write(&tmp_path, &bytes).is_err() {
+            return -1;
+        }
+
+        // Set permissions (Unix)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                &tmp_path,
+                std::fs::Permissions::from_mode(0o600),
+            );
+        }
+
+        let path_cstr = match CString::new(tmp_path.clone()) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+
+        let result = engine_auth_key(session_id as SessionId, path_cstr.as_ptr());
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(&tmp_path);
+
+        result
     }
 
     /// JNI wrapper: submits an MFA (TOTP) code.
@@ -1184,89 +1213,173 @@ mod jni_exports {
 
     /// JNI wrapper: lists directory contents via SFTP.
     /// Returns a JSON string array of file entries.
-    /// Not yet implemented — placeholder returns "[]".
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpList(
         env: JNIEnv,
         _class: JClass,
         session_id: jlong,
-        _path: JString,
+        path: JString,
     ) -> jstring {
-        let _ = session_id;
-        let empty_json = "[]".to_string();
-        match env.new_string(empty_json) {
+        let path_str: String = match env.get_string(&path) {
+            Ok(s) => s.into(),
+            Err(_) => {
+                let fallback = env.new_string("[]").unwrap_or_default();
+                return fallback.into_raw();
+            }
+        };
+
+        let path_cstr = match CString::new(path_str) {
+            Ok(s) => s,
+            Err(_) => {
+                let fallback = env.new_string("[]").unwrap_or_default();
+                return fallback.into_raw();
+            }
+        };
+
+        let mut json_buf = [0u8; 65536];
+        let result = engine_sftp_list(
+            session_id as SessionId,
+            path_cstr.as_ptr(),
+            json_buf.as_mut_ptr() as *mut _,
+            json_buf.len(),
+        );
+
+        let json_str = if result == 0 {
+            let null_pos = json_buf.iter().position(|&b| b == 0).unwrap_or(0);
+            String::from_utf8_lossy(&json_buf[..null_pos]).to_string()
+        } else {
+            "[]".to_string()
+        };
+
+        match env.new_string(json_str) {
             Ok(output) => output.into_raw(),
             Err(_) => {
-                // Return empty string on failure — JNI callers expect non-null
-                let fallback = env.new_string("").unwrap_or_default();
+                let fallback = env.new_string("[]").unwrap_or_default();
                 fallback.into_raw()
             }
         }
     }
 
     /// JNI wrapper: uploads a local file to the remote path via SFTP.
-    /// Not yet implemented — placeholder returns 0.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpUpload(
-        _env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
         session_id: jlong,
-        _local_path: JString,
-        _remote_path: JString,
+        local_path: JString,
+        remote_path: JString,
     ) -> jint {
-        info!(session_id, "SFTP upload initiated");
-        0
+        let local: String = match env.get_string(&local_path) {
+            Ok(s) => s.into(),
+            Err(_) => return -1,
+        };
+        let remote: String = match env.get_string(&remote_path) {
+            Ok(s) => s.into(),
+            Err(_) => return -1,
+        };
+        let local_cstr = match CString::new(local) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        let remote_cstr = match CString::new(remote) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        engine_sftp_upload(session_id as SessionId, local_cstr.as_ptr(), remote_cstr.as_ptr())
     }
 
     /// JNI wrapper: downloads a remote file to the local path via SFTP.
-    /// Not yet implemented — placeholder returns 0.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpDownload(
-        _env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
         session_id: jlong,
-        _remote_path: JString,
-        _local_path: JString,
+        remote_path: JString,
+        local_path: JString,
     ) -> jint {
-        info!(session_id, "SFTP download initiated");
-        0
+        let remote: String = match env.get_string(&remote_path) {
+            Ok(s) => s.into(),
+            Err(_) => return -1,
+        };
+        let local: String = match env.get_string(&local_path) {
+            Ok(s) => s.into(),
+            Err(_) => return -1,
+        };
+        let remote_cstr = match CString::new(remote) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        let local_cstr = match CString::new(local) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        engine_sftp_download(session_id as SessionId, remote_cstr.as_ptr(), local_cstr.as_ptr())
     }
 
     /// JNI wrapper: creates a directory via SFTP.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpMkdir(
-        _env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
         session_id: jlong,
-        _path: JString,
+        path: JString,
     ) -> jint {
-        info!(session_id, "SFTP mkdir");
-        0
+        let path_str: String = match env.get_string(&path) {
+            Ok(s) => s.into(),
+            Err(_) => return -1,
+        };
+        let path_cstr = match CString::new(path_str) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        engine_sftp_mkdir(session_id as SessionId, path_cstr.as_ptr())
     }
 
     /// JNI wrapper: deletes a remote file via SFTP.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpDelete(
-        _env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
         session_id: jlong,
-        _path: JString,
+        path: JString,
     ) -> jint {
-        info!(session_id, "SFTP delete");
-        0
+        let path_str: String = match env.get_string(&path) {
+            Ok(s) => s.into(),
+            Err(_) => return -1,
+        };
+        let path_cstr = match CString::new(path_str) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        engine_sftp_delete(session_id as SessionId, path_cstr.as_ptr())
     }
 
     /// JNI wrapper: renames a remote file via SFTP.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeSftpRename(
-        _env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
         session_id: jlong,
-        _old_path: JString,
-        _new_path: JString,
+        old_path: JString,
+        new_path: JString,
     ) -> jint {
-        info!(session_id, "SFTP rename");
-        0
+        let old: String = match env.get_string(&old_path) {
+            Ok(s) => s.into(),
+            Err(_) => return -1,
+        };
+        let new: String = match env.get_string(&new_path) {
+            Ok(s) => s.into(),
+            Err(_) => return -1,
+        };
+        let old_cstr = match CString::new(old) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        let new_cstr = match CString::new(new) {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        engine_sftp_rename(session_id as SessionId, old_cstr.as_ptr(), new_cstr.as_ptr())
     }
 
     /// JNI wrapper: pushes local clipboard data to the remote session.

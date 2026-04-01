@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'screens/home_screen.dart';
+import 'services/session_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
