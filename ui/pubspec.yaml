@@ -23,6 +23,7 @@ dependencies:
   json_annotation: ^4.9.0
   material_design_icons_flutter: ^7.0.0
   fl_chart: ^0.68.0
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

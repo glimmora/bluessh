@@ -6,10 +6,12 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../models/host_profile.dart';
 import '../models/session_state.dart';
 import '../services/session_service.dart';
 import '../services/credential_service.dart';
+import '../services/permission_service.dart';
 import 'terminal_screen.dart';
 import 'multi_terminal_screen.dart';
 import 'file_manager_screen.dart';
@@ -78,6 +80,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _connectToHost(HostProfile profile) async {
+    // ── Step 0: Check and request runtime permissions ──────────
+    final permResult = await PermissionService.requestConnectionPermissions();
+    if (!permResult.allGranted) {
+      if (!mounted) return;
+      final denied = permResult.permanentlyDenied;
+      if (denied.isNotEmpty) {
+        final names = denied.map((p) => PermissionService.describe(p)).join(', ');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Permissions required: $names'),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: () => openAppSettings(),
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Permissions are required to maintain a stable connection'),
+          ),
+        );
+      }
+      return;
+    }
+
     final sessionService = ref.read(sessionServiceProvider);
 
     showDialog(
@@ -431,6 +459,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   void _openFileManager(HostProfile profile) async {
+    // ── Check permissions before SFTP connection ──────────────
+    final permResult = await PermissionService.requestConnectionPermissions();
+    if (!permResult.allGranted) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Permissions are required for file transfers'),
+        ),
+      );
+      return;
+    }
+
     final sessionService = ref.read(sessionServiceProvider);
     final sshProfile = profile.copyWith(protocol: ProtocolType.ssh);
     final sessionId = await sessionService.connect(sshProfile);
