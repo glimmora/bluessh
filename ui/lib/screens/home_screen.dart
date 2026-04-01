@@ -6,13 +6,15 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/host_profile.dart';
 import '../models/session_state.dart';
 import '../services/session_service.dart';
+import '../services/credential_service.dart';
 import 'terminal_screen.dart';
+import 'multi_terminal_screen.dart';
 import 'file_manager_screen.dart';
 import 'remote_desktop_screen.dart';
+import 'forwarding_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -41,21 +43,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _loadProfiles() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList('host_profiles') ?? [];
+    final creds = CredentialService.instance();
+    final profiles = await creds.loadAllProfiles();
+    if (!mounted) return;
     setState(() {
-      _profiles = raw.map((e) => HostProfile.fromJsonString(e)).toList()
-        ..sort((a, b) => b.lastUsed.compareTo(a.lastUsed));
+      _profiles = profiles;
       _isLoading = false;
     });
   }
 
-  Future<void> _saveProfiles() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(
-      'host_profiles',
-      _profiles.map((e) => e.toJsonString()).toList(),
-    );
+  Future<void> _saveProfile(HostProfile profile) async {
+    await CredentialService.instance().saveProfile(profile);
+  }
+
+  Future<void> _deleteProfileFromStore(String profileId) async {
+    await CredentialService.instance().deleteProfile(profileId);
   }
 
   Future<void> _connectToHost(HostProfile profile) async {
@@ -99,7 +101,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           lastUsed: DateTime.now(),
           connectionCount: profile.connectionCount + 1,
         );
-        _saveProfiles();
+        _saveProfile(_profiles[idx]);
       }
 
       // Navigate to appropriate screen
@@ -108,10 +110,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       switch (profile.protocol) {
         case ProtocolType.ssh:
         case ProtocolType.sftp:
-          screen = TerminalScreen(
-            sessionId: sessionId,
-            profile: profile,
-          );
+          screen = MultiTerminalScreen(profile: profile);
         case ProtocolType.vnc:
         case ProtocolType.rdp:
           screen = RemoteDesktopScreen(
@@ -142,7 +141,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           setState(() {
             _profiles.insert(0, profile);
           });
-          _saveProfiles();
+          _saveProfile(profile);
         },
       ),
     );
@@ -160,7 +159,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             final idx = _profiles.indexWhere((p) => p.id == profile.id);
             if (idx >= 0) _profiles[idx] = updated;
           });
-          _saveProfiles();
+          _saveProfile(updated);
         },
       ),
     );
@@ -182,7 +181,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               setState(() {
                 _profiles.removeWhere((p) => p.id == profile.id);
               });
-              _saveProfiles();
+              _deleteProfileFromStore(profile.id);
               Navigator.pop(ctx);
             },
             style: FilledButton.styleFrom(
@@ -383,6 +382,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             onEdit: () => _showEditHostDialog(profile),
                             onDelete: () => _deleteProfile(profile),
                             onFileManager: () => _openFileManager(profile),
+                            onForwarding: () => _openForwarding(profile),
                           );
                         },
                       ),
@@ -393,6 +393,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         onPressed: _showAddHostDialog,
         icon: const Icon(Icons.add),
         label: const Text('New Host'),
+      ),
+    );
+  }
+
+  void _openForwarding(HostProfile profile) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ForwardingScreen(profile: profile),
       ),
     );
   }
@@ -429,6 +437,7 @@ class _HostCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onFileManager;
+  final VoidCallback onForwarding;
 
   const _HostCard({
     required this.profile,
@@ -437,6 +446,7 @@ class _HostCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onFileManager,
+    required this.onForwarding,
   });
 
   IconData _protocolIcon(ProtocolType p) {
@@ -584,6 +594,9 @@ color: _protocolColor(profile.protocol).withOpacity(0.12),
                           case 'files':
                             onFileManager();
                             break;
+                          case 'forwarding':
+                            onForwarding();
+                            break;
                           case 'edit':
                             onEdit();
                             break;
@@ -607,6 +620,15 @@ color: _protocolColor(profile.protocol).withOpacity(0.12),
                             child: ListTile(
                               leading: Icon(Icons.folder_outlined),
                               title: Text('File Manager'),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                        if (profile.protocol == ProtocolType.ssh)
+                          const PopupMenuItem(
+                            value: 'forwarding',
+                            child: ListTile(
+                              leading: Icon(Icons.swap_horiz),
+                              title: Text('Port Forwarding'),
                               contentPadding: EdgeInsets.zero,
                             ),
                           ),

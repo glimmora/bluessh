@@ -6,6 +6,8 @@
 library;
 
 import 'dart:convert';
+import 'port_forward.dart';
+export 'port_forward.dart';
 
 /// Supported remote-access protocols with metadata.
 enum ProtocolType {
@@ -26,6 +28,14 @@ enum ProtocolType {
   final String category;
 
   const ProtocolType(this.value, this.label, this.category);
+
+  /// Safe lookup by integer value with fallback to ssh.
+  static ProtocolType byValue(int v) {
+    for (final p in ProtocolType.values) {
+      if (p.value == v) return p;
+    }
+    return ProtocolType.ssh;
+  }
 }
 
 /// Immutable connection profile for a single remote host.
@@ -52,7 +62,7 @@ class HostProfile {
   /// Remote username (empty for VNC-only connections).
   final String username;
 
-  /// Plaintext password (stored encrypted at rest).
+  /// Plaintext password (stored encrypted at rest via CredentialService).
   final String? password;
 
   /// Filesystem path to an SSH private key.
@@ -91,6 +101,33 @@ class HostProfile {
   /// User-defined tags for filtering and organization.
   final List<String> tags;
 
+  // ── Jump Host Fields ────────────────────────────────────────────
+
+  /// Hostname or IP of the jump/bastion host (null = direct connection).
+  final String? jumpHost;
+
+  /// Port of the jump host (default: 22).
+  final int jumpPort;
+
+  /// Username on the jump host (defaults to the target username).
+  final String? jumpUsername;
+
+  /// Password for the jump host.
+  final String? jumpPassword;
+
+  /// Key path for the jump host.
+  final String? jumpKeyPath;
+
+  // ── Port Forwarding ─────────────────────────────────────────────
+
+  /// Port forwarding rules for this connection.
+  final List<PortForward> portForwards;
+
+  // ── Agent Forwarding ────────────────────────────────────────────
+
+  /// Whether to forward the SSH agent to the remote host.
+  final bool agentForwarding;
+
   const HostProfile({
     required this.id,
     required this.name,
@@ -111,6 +148,13 @@ class HostProfile {
     this.envVars = const {},
     this.workingDirectory,
     this.tags = const [],
+    this.jumpHost,
+    this.jumpPort = 22,
+    this.jumpUsername,
+    this.jumpPassword,
+    this.jumpKeyPath,
+    this.portForwards = const [],
+    this.agentForwarding = false,
   });
 
   /// Creates an SSH host profile with sensible defaults (port 22, medium compression).
@@ -197,6 +241,13 @@ class HostProfile {
     Map<String, String>? envVars,
     String? workingDirectory,
     List<String>? tags,
+    String? jumpHost,
+    int? jumpPort,
+    String? jumpUsername,
+    String? jumpPassword,
+    String? jumpKeyPath,
+    List<PortForward>? portForwards,
+    bool? agentForwarding,
   }) {
     return HostProfile(
       id: id,
@@ -218,27 +269,55 @@ class HostProfile {
       envVars: envVars ?? this.envVars,
       workingDirectory: workingDirectory ?? this.workingDirectory,
       tags: tags ?? this.tags,
+      jumpHost: jumpHost ?? this.jumpHost,
+      jumpPort: jumpPort ?? this.jumpPort,
+      jumpUsername: jumpUsername ?? this.jumpUsername,
+      jumpPassword: jumpPassword ?? this.jumpPassword,
+      jumpKeyPath: jumpKeyPath ?? this.jumpKeyPath,
+      portForwards: portForwards ?? this.portForwards,
+      agentForwarding: agentForwarding ?? this.agentForwarding,
     );
   }
 
-  /// Serializes to a JSON-compatible map (excludes password/keyData for safety).
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'host': host,
-        'port': port,
-        'protocol': protocol.value,
-        'username': username,
-        'keyPath': keyPath,
-        'compressionLevel': compressionLevel,
-        'recordSession': recordSession,
-        'useMfa': useMfa,
-        'lastUsed': lastUsed.toIso8601String(),
-        'connectionCount': connectionCount,
-        'envVars': envVars,
-        'workingDirectory': workingDirectory,
-        'tags': tags,
-      };
+  /// Serializes to a JSON-compatible map.
+  ///
+  /// When [includeCredentials] is true, sensitive fields are included.
+  /// Default is false for backward compatibility.
+  Map<String, dynamic> toJson({bool includeCredentials = false}) {
+    final map = <String, dynamic>{
+      'id': id,
+      'name': name,
+      'host': host,
+      'port': port,
+      'protocol': protocol.value,
+      'username': username,
+      'keyPath': keyPath,
+      'compressionLevel': compressionLevel,
+      'recordSession': recordSession,
+      'useMfa': useMfa,
+      'lastUsed': lastUsed.toIso8601String(),
+      'connectionCount': connectionCount,
+      'envVars': envVars,
+      'workingDirectory': workingDirectory,
+      'tags': tags,
+      'jumpHost': jumpHost,
+      'jumpPort': jumpPort,
+      'jumpUsername': jumpUsername,
+      'jumpKeyPath': jumpKeyPath,
+      'portForwards': portForwards.map((f) => f.toJson()).toList(),
+      'agentForwarding': agentForwarding,
+    };
+
+    if (includeCredentials) {
+      map['password'] = password;
+      map['keyData'] = keyData;
+      map['passphrase'] = passphrase;
+      map['mfaSecret'] = mfaSecret;
+      map['jumpPassword'] = jumpPassword;
+    }
+
+    return map;
+  }
 
   /// Deserializes from a JSON map.
   factory HostProfile.fromJson(Map<String, dynamic> json) {
@@ -247,9 +326,13 @@ class HostProfile {
       name: json['name'] as String,
       host: json['host'] as String,
       port: json['port'] as int,
-      protocol: ProtocolType.values[json['protocol'] as int],
+      protocol: ProtocolType.byValue(json['protocol'] as int),
       username: json['username'] as String,
+      password: json['password'] as String?,
       keyPath: json['keyPath'] as String?,
+      keyData: json['keyData'] as String?,
+      passphrase: json['passphrase'] as String?,
+      mfaSecret: json['mfaSecret'] as String?,
       compressionLevel: json['compressionLevel'] as int? ?? 2,
       recordSession: json['recordSession'] as bool? ?? false,
       useMfa: json['useMfa'] as bool? ?? false,
@@ -258,6 +341,16 @@ class HostProfile {
       envVars: (json['envVars'] as Map?)?.cast<String, String>() ?? {},
       workingDirectory: json['workingDirectory'] as String?,
       tags: (json['tags'] as List?)?.cast<String>() ?? [],
+      jumpHost: json['jumpHost'] as String?,
+      jumpPort: json['jumpPort'] as int? ?? 22,
+      jumpUsername: json['jumpUsername'] as String?,
+      jumpPassword: json['jumpPassword'] as String?,
+      jumpKeyPath: json['jumpKeyPath'] as String?,
+      portForwards: (json['portForwards'] as List?)
+              ?.map((f) => PortForward.fromJson(f as Map<String, dynamic>))
+              .toList() ??
+          [],
+      agentForwarding: json['agentForwarding'] as bool? ?? false,
     );
   }
 

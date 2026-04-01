@@ -18,10 +18,15 @@
 //!   - String pointers are valid UTF-8 or will return error codes.
 
 #![allow(clippy::missing_safety_doc)]
-#![allow(unused_variables)]
+
+mod keygen;
+mod known_hosts;
+mod runtime;
+mod ssh_session;
+mod totp;
 
 use std::collections::HashMap;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 use std::sync::{OnceLock, RwLock};
 
@@ -148,12 +153,15 @@ pub enum EngineEvent {
 // ═══════════════════════════════════════════════════════════════════
 
 /// Internal per-session bookkeeping.
-#[allow(dead_code)]
 struct SessionHandle {
     id: SessionId,
     protocol: ProtocolType,
     state: SessionState,
     config: SessionConfig,
+    /// Channel to send commands to the SSH session (if protocol is SSH).
+    command_tx: Option<std::sync::mpsc::Sender<ssh_session::SessionCommand>>,
+    /// Channel to receive events from the SSH session.
+    event_rx: Option<std::sync::Mutex<std::sync::mpsc::Receiver<ssh_session::SessionEvent>>>,
 }
 
 /// Internal session configuration stored after FFI parsing.
@@ -303,6 +311,8 @@ pub unsafe extern "C" fn engine_connect(config: *const CSessionConfig) -> Sessio
             compress_level,
             record_session: cfg.record_session,
         },
+        command_tx: None,
+        event_rx: None,
     };
 
     state.sessions.insert(session_id, handle);
@@ -316,15 +326,21 @@ pub unsafe extern "C" fn engine_connect(config: *const CSessionConfig) -> Sessio
 /// Returns `0` if the session existed, `-1` if not found or lock poisoned.
 #[no_mangle]
 pub unsafe extern "C" fn engine_disconnect(session_id: SessionId) -> c_int {
-    match engine().write() {
-        Ok(mut state) => match state.sessions.remove(&session_id) {
-            Some(_) => {
-                info!(session_id, "Session disconnected");
-                0
+    let mut state = match engine().write() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    match state.sessions.remove(&session_id) {
+        Some(session) => {
+            // Send disconnect command to SSH session
+            if let Some(ref cmd_tx) = session.command_tx {
+                let _ = cmd_tx.send(ssh_session::SessionCommand::Disconnect);
             }
-            None => -1,
-        },
-        Err(_) => -1,
+            info!(session_id, "Session disconnected");
+            0
+        }
+        None => -1,
     }
 }
 
@@ -341,24 +357,128 @@ pub unsafe extern "C" fn engine_write(session_id: SessionId, data: *const u8, le
         return -1;
     }
 
-    let _buf = std::slice::from_raw_parts(data, len);
-    info!(session_id, len, "Write to session");
-    0
+    let buf = std::slice::from_raw_parts(data, len);
+
+    let state = match engine().read() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    if let Some(session) = state.sessions.get(&session_id) {
+        if let Some(ref cmd_tx) = session.command_tx {
+            let cmd = ssh_session::SessionCommand::Write(buf.to_vec());
+            match cmd_tx.send(cmd) {
+                Ok(_) => {
+                    info!(session_id, len, "Write to session");
+                    0
+                }
+                Err(_) => -1,
+            }
+        } else {
+            // No active SSH channel — stub mode for VNC/RDP
+            info!(session_id, len, "Write to session (stub)");
+            0
+        }
+    } else {
+        -1
+    }
+}
+
+/// Reads data from a session's event channel.
+///
+/// # Safety
+///
+/// `out_buf` must point to at least `out_len` contiguous bytes.
+/// The actual number of bytes written is stored in `out_read`.
+///
+/// Returns `0` if data was read, `1` if no data available, `-1` on error.
+#[no_mangle]
+pub unsafe extern "C" fn engine_read(
+    session_id: SessionId,
+    out_buf: *mut u8,
+    out_len: usize,
+    out_read: *mut usize,
+) -> c_int {
+    if out_buf.is_null() || out_len == 0 || out_read.is_null() {
+        return -1;
+    }
+
+    let state = match engine().read() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    if let Some(session) = state.sessions.get(&session_id) {
+        if let Some(ref event_rx) = session.event_rx {
+            let rx = event_rx.lock().unwrap();
+            match rx.try_recv() {
+                Ok(ssh_session::SessionEvent::Data(data)) => {
+                    let copy_len = data.len().min(out_len);
+                    std::ptr::copy_nonoverlapping(data.as_ptr(), out_buf, copy_len);
+                    *out_read = copy_len;
+                    0
+                }
+                Ok(ssh_session::SessionEvent::Disconnected(_)) => {
+                    *out_read = 0;
+                    2 // Signal disconnection
+                }
+                Ok(_) => {
+                    *out_read = 0;
+                    1 // No data, but other event
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    *out_read = 0;
+                    1 // No data available
+                }
+                Err(_) => -1,
+            }
+        } else {
+            *out_read = 0;
+            1 // No event channel
+        }
+    } else {
+        -1
+    }
 }
 
 /// Resizes the terminal PTY for the given session.
 ///
-/// Returns `0` on success.
+/// Returns `0` on success, `-1` if the session does not exist.
 #[no_mangle]
 pub unsafe extern "C" fn engine_resize(session_id: SessionId, cols: u16, rows: u16) -> c_int {
-    info!(session_id, cols, rows, "Terminal resized");
-    0
+    if cols == 0 || rows == 0 {
+        return -1;
+    }
+
+    let state = match engine().read() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    if let Some(session) = state.sessions.get(&session_id) {
+        if let Some(ref cmd_tx) = session.command_tx {
+            let cmd = ssh_session::SessionCommand::Resize { cols, rows };
+            match cmd_tx.send(cmd) {
+                Ok(_) => {
+                    info!(session_id, cols, rows, "Terminal resized");
+                    0
+                }
+                Err(_) => -1,
+            }
+        } else {
+            info!(session_id, cols, rows, "Terminal resized (stub)");
+            0
+        }
+    } else {
+        -1
+    }
 }
 
 /// Authenticates a session using a plaintext password.
 ///
 /// The password is zeroized after use to avoid leaving credentials
-/// in heap memory.
+/// in heap memory. This function spawns a real SSH connection using
+/// the session's configuration (host, port) and the provided password.
 ///
 /// Returns `0` on success, `-1` if the pointer is null or invalid UTF-8.
 #[no_mangle]
@@ -370,16 +490,85 @@ pub unsafe extern "C" fn engine_auth_password(
         return -1;
     }
 
-    let mut pw = match CStr::from_ptr(password).to_str() {
+    let pw = match CStr::from_ptr(password).to_str() {
         Ok(p) => p.to_string(),
         Err(_) => return -1,
     };
 
-    // TODO: Forward to SSH password authentication handler.
-    pw.zeroize();
+    // Get session config
+    let (host, port, username) = {
+        let state = match engine().read() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+        match state.sessions.get(&session_id) {
+            Some(handle) => (
+                handle.config.host.clone(),
+                handle.config.port,
+                // Username is stored in the config; for now use empty
+                // (Dart side sets it via engine_auth_username or in connect)
+                String::new(),
+            ),
+            None => return -1,
+        }
+    };
 
-    info!(session_id, "Password auth submitted");
-    0
+    // Create SSH config and connect
+    let ssh_config = ssh_session::SshConfig {
+        host: host.clone(),
+        port,
+        username: username.clone(),
+        password: Some(pw.clone()),
+        key_path: None,
+        passphrase: None,
+    };
+
+    match runtime::block_on(ssh_session::connect_ssh(ssh_config)) {
+        Ok(handle) => {
+            let mut state = match engine().write() {
+                Ok(s) => s,
+                Err(_) => return -1,
+            };
+            if let Some(session) = state.sessions.get_mut(&session_id) {
+                // Convert unbounded channels to bounded for FFI
+                let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
+                let (event_tx, event_rx) = std::sync::mpsc::channel();
+
+                // Forward from bounded to unbounded
+                let unbounded_tx = handle.command_tx;
+                let mut unbounded_rx = handle.event_rx;
+
+                // Spawn forwarder for commands (bounded -> unbounded)
+                std::thread::spawn(move || {
+                    while let Ok(cmd) = cmd_rx.recv() {
+                        if unbounded_tx.send(cmd).is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                // Spawn forwarder for events (unbounded -> bounded)
+                std::thread::spawn(move || {
+                    while let Some(event) = runtime::runtime().block_on(unbounded_rx.recv()) {
+                        if event_tx.send(event).is_err() {
+                            break;
+                        }
+                    }
+                });
+
+                session.command_tx = Some(cmd_tx);
+                session.event_rx = Some(std::sync::Mutex::new(event_rx));
+                session.state = SessionState::Connected;
+            }
+
+            info!(session_id, "SSH authenticated via password");
+            0
+        }
+        Err(e) => {
+            tracing::error!(session_id, "SSH auth failed: {e}");
+            -1
+        }
+    }
 }
 
 /// Authenticates a session using a private key file at the given path.
@@ -450,6 +639,96 @@ pub unsafe extern "C" fn engine_recording_start(
 pub unsafe extern "C" fn engine_recording_stop(session_id: SessionId) -> c_int {
     info!(session_id, "Recording stopped");
     0
+}
+
+/// Generates an SSH key pair and writes to disk.
+///
+/// - `key_type`: 0=Ed25519, 1=ECDSA.
+/// - `output_path`: Filesystem path for the private key file.
+/// - `passphrase`: Optional passphrase (nullable for unencrypted).
+/// - `out_pubkey`: Buffer to receive the public key string.
+/// - `out_pubkey_len`: Size of the output buffer.
+///
+/// Returns `0` on success, `-1` on failure.
+#[no_mangle]
+pub unsafe extern "C" fn engine_key_generate(
+    key_type: u8,
+    output_path: *const c_char,
+    passphrase: *const c_char,
+    out_pubkey: *mut c_char,
+    out_pubkey_len: usize,
+) -> c_int {
+    if output_path.is_null() || out_pubkey.is_null() || out_pubkey_len == 0 {
+        return -1;
+    }
+
+    let path = match CStr::from_ptr(output_path).to_str() {
+        Ok(p) => p,
+        Err(_) => return -1,
+    };
+
+    let pass = if passphrase.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(passphrase).to_str() {
+            Ok(p) if !p.is_empty() => Some(p),
+            _ => None,
+        }
+    };
+
+    let kt = match key_type {
+        0 => keygen::KeyType::Ed25519,
+        1 => keygen::KeyType::Ecdsa,
+        _ => return -1,
+    };
+
+    match keygen::generate_key_pair(kt, path, pass) {
+        Ok(pubkey) => {
+            let bytes = pubkey.as_bytes();
+            let len = bytes.len().min(out_pubkey_len - 1);
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_pubkey as *mut u8, len);
+            *out_pubkey.add(len) = 0; // null terminator
+            info!(path, "Key pair generated");
+            0
+        }
+        Err(e) => {
+            tracing::error!("Key generation failed: {e}");
+            -1
+        }
+    }
+}
+
+/// Generates a TOTP code from a base32-encoded secret.
+///
+/// - `secret`: Base32-encoded TOTP secret.
+/// - `out_code`: Buffer to receive the 6-digit code.
+/// - `out_code_len`: Size of the output buffer (minimum 7 for null terminator).
+///
+/// Returns `0` on success, `-1` on failure.
+#[no_mangle]
+pub unsafe extern "C" fn engine_totp_generate(
+    secret: *const c_char,
+    out_code: *mut c_char,
+    out_code_len: usize,
+) -> c_int {
+    if secret.is_null() || out_code.is_null() || out_code_len < 7 {
+        return -1;
+    }
+
+    let secret_str = match CStr::from_ptr(secret).to_str() {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    match totp::generate_totp(secret_str) {
+        Some(code) => {
+            let bytes = code.as_bytes();
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_code as *mut u8, 6);
+            *out_code.add(6) = 0;
+            0
+        }
+        None => -1,
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════

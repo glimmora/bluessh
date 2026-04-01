@@ -5,8 +5,10 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import '../models/host_profile.dart';
 import '../models/session_state.dart';
 import '../services/session_service.dart';
@@ -99,10 +101,66 @@ class _FileManagerScreenState extends ConsumerState<FileManagerScreen> {
   }
 
   Future<void> _uploadFile() async {
-    // In a real implementation, use file_picker
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Select file to upload...')),
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
     );
+
+    if (result == null || result.files.isEmpty) return;
+
+    final sessionService = ref.read(sessionServiceProvider);
+
+    for (final file in result.files) {
+      if (!mounted) return;
+
+      final remotePath = '$_currentPath/${file.name}';
+
+      // Show progress indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text('Uploading ${file.name}...'),
+            ],
+          ),
+        ),
+      );
+
+      // Upload via path (desktop) or data (Android)
+      if (file.path != null) {
+        await sessionService.sftpUpload(
+          widget.sessionId,
+          file.path!,
+          remotePath,
+        );
+      } else if (file.bytes != null) {
+        // On Android, write bytes to temp file then upload
+        final tempDir = await Directory.systemTemp.createTemp('bluessh_upload');
+        final tempFile = File('${tempDir.path}/${file.name}');
+        await tempFile.writeAsBytes(file.bytes!);
+        await sessionService.sftpUpload(
+          widget.sessionId,
+          tempFile.path,
+          remotePath,
+        );
+        await tempFile.delete();
+        await tempDir.delete();
+      }
+
+      if (!mounted) return;
+      Navigator.pop(context); // dismiss progress
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Uploaded: ${file.name}')),
+      );
+    }
+
+    _loadDirectory(_currentPath);
   }
 
   Future<void> _downloadFile(SftpFileEntry entry) async {

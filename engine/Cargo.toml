@@ -27,12 +27,24 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Memory safety
 zeroize = { version = "1", features = ["derive"] }
 
-# JNI (Android only)
-[target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
+# SSH key generation
+ssh-key = { version = "0.6", features = ["ed25519", "ecdsa", "alloc"] }
 
 # UUID for session IDs
 uuid = { version = "1", features = ["v4"] }
+
+# TOTP for MFA
+totp-rs = "5"
+
+# Random number generation
+rand = "0.8"
+
+# Error handling
+anyhow = "1"
+
+# JNI (Android only)
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
 
 [features]
 default = []
