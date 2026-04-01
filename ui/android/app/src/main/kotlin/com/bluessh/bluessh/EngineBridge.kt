@@ -58,7 +58,8 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
         port: Int,
         protocol: Int,
         compressLevel: Int,
-        recordSession: Boolean
+        recordSession: Boolean,
+        username: String
     ): Long
 
     /** Disconnects the session. Returns 0 on success. */
@@ -134,7 +135,8 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
                         call.argument<Int>("port") ?: 22,
                         call.argument<Int>("protocol") ?: 0,
                         call.argument<Int>("compressLevel") ?: 2,
-                        call.argument<Boolean>("recordSession") ?: false
+                        call.argument<Boolean>("recordSession") ?: false,
+                        call.argument<String>("username") ?: ""
                     )
                     result.success(sessionId)
                 }

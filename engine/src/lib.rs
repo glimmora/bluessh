@@ -74,12 +74,13 @@ pub enum CompressionLevel {
 
 /// FFI-compatible session configuration received from the UI layer.
 ///
-/// The `host` field is a C-string pointer that must remain valid for
-/// the duration of the `engine_connect` call.
+/// The `host` and `username` fields are C-string pointers that must
+/// remain valid for the duration of the `engine_connect` call.
 #[repr(C)]
 #[derive(Debug)]
 pub struct CSessionConfig {
     pub host: *const c_char,
+    pub username: *const c_char,
     pub port: u16,
     pub protocol: u8,
     pub compress_level: u8,
@@ -173,6 +174,7 @@ struct SessionHandle {
 struct SessionConfig {
     host: String,
     port: u16,
+    username: String,
     compress_level: CompressionLevel,
     record_session: bool,
 }
@@ -280,6 +282,15 @@ pub unsafe extern "C" fn engine_connect(config: *const CSessionConfig) -> Sessio
         Err(_) => return 0,
     };
 
+    let username = if cfg.username.is_null() {
+        String::new()
+    } else {
+        match CStr::from_ptr(cfg.username).to_str() {
+            Ok(u) => u.to_string(),
+            Err(_) => return 0,
+        }
+    };
+
     let protocol = match cfg.protocol {
         0 => ProtocolType::Ssh,
         1 => ProtocolType::Vnc,
@@ -312,6 +323,7 @@ pub unsafe extern "C" fn engine_connect(config: *const CSessionConfig) -> Sessio
         config: SessionConfig {
             host,
             port: cfg.port,
+            username,
             compress_level,
             record_session: cfg.record_session,
         },
@@ -509,9 +521,7 @@ pub unsafe extern "C" fn engine_auth_password(
             Some(handle) => (
                 handle.config.host.clone(),
                 handle.config.port,
-                // Username is stored in the config; for now use empty
-                // (Dart side sets it via engine_auth_username or in connect)
-                String::new(),
+                handle.config.username.clone(),
             ),
             None => return -1,
         }
@@ -1047,6 +1057,7 @@ mod jni_exports {
         protocol: jint,
         compress_level: jint,
         record_session: bool,
+        username: JString,
     ) -> jlong {
         let host_str: String = match env.get_string(&host) {
             Ok(s) => s.into(),
@@ -1057,8 +1068,16 @@ mod jni_exports {
             Ok(s) => s,
             Err(_) => return 0,
         };
+
+        let username_str: String = match env.get_string(&username) {
+            Ok(s) => s.into(),
+            Err(_) => String::new(),
+        };
+        let username_cstr = CString::new(username_str).unwrap_or_default();
+
         let config = CSessionConfig {
             host: host_cstr.as_ptr(),
+            username: username_cstr.as_ptr(),
             port: port as u16,
             protocol: protocol as u8,
             compress_level: compress_level as u8,

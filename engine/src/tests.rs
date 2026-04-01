@@ -39,8 +39,10 @@ mod tests {
     #[test]
     fn connect_null_host_returns_zero() {
         engine_init();
+        let username = CString::new("testuser").unwrap();
         let config = CSessionConfig {
             host: std::ptr::null(),
+            username: username.as_ptr(),
             port: 22,
             protocol: 0,
             compress_level: 2,
@@ -53,8 +55,10 @@ mod tests {
     fn connect_invalid_protocol_returns_zero() {
         engine_init();
         let host = CString::new("127.0.0.1").unwrap();
+        let username = CString::new("testuser").unwrap();
         let config = CSessionConfig {
             host: host.as_ptr(),
+            username: username.as_ptr(),
             port: 22,
             protocol: 255,
             compress_level: 2,
@@ -67,8 +71,10 @@ mod tests {
     fn connect_empty_host_returns_zero() {
         engine_init();
         let host = CString::new("").unwrap();
+        let username = CString::new("testuser").unwrap();
         let config = CSessionConfig {
             host: host.as_ptr(),
+            username: username.as_ptr(),
             port: 22,
             protocol: 0,
             compress_level: 2,
@@ -81,8 +87,10 @@ mod tests {
     fn connect_valid_config_returns_nonzero() {
         engine_init();
         let host = CString::new("127.0.0.1").unwrap();
+        let username = CString::new("testuser").unwrap();
         let config = CSessionConfig {
             host: host.as_ptr(),
+            username: username.as_ptr(),
             port: 22,
             protocol: 0,
             compress_level: 2,
@@ -107,8 +115,10 @@ mod tests {
     fn disconnect_existing_returns_zero() {
         engine_init();
         let host = CString::new("127.0.0.1").unwrap();
+        let username = CString::new("testuser").unwrap();
         let config = CSessionConfig {
             host: host.as_ptr(),
+            username: username.as_ptr(),
             port: 22,
             protocol: 0,
             compress_level: 2,
@@ -123,8 +133,10 @@ mod tests {
     fn disconnect_twice_returns_minus_one() {
         engine_init();
         let host = CString::new("127.0.0.1").unwrap();
+        let username = CString::new("testuser").unwrap();
         let config = CSessionConfig {
             host: host.as_ptr(),
+            username: username.as_ptr(),
             port: 22,
             protocol: 0,
             compress_level: 2,

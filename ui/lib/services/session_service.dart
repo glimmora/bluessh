@@ -158,6 +158,7 @@ class SessionService {
         'protocol': protocolToEngineValue(profile.protocol),
         'compressLevel': profile.compressionLevel,
         'recordSession': profile.recordSession,
+        'username': profile.username,
       }).timeout(
         const Duration(seconds: 30),
         onTimeout: () {
