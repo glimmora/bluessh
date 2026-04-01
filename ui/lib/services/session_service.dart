@@ -8,9 +8,11 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/host_profile.dart';
 import '../models/session_state.dart';
@@ -560,9 +562,24 @@ class SessionService {
   /// When at least one session is active, the service shows a persistent
   /// notification and tells the OS not to kill the process.  When all
   /// sessions disconnect, the service is stopped.
+  ///
+  /// On Android 13+ the notification permission must be granted or the
+  /// foreground service cannot post its notification, which leads to a
+  /// ForegroundServiceDidNotStartInTimeException crash.
   Future<void> _updateForegroundService() async {
     try {
       if (_activeSessionCount > 0) {
+        // Verify notification permission before starting the foreground service
+        if (Platform.isAndroid) {
+          final status = await Permission.notification.status;
+          if (!status.isGranted && !status.isLimited) {
+            debugPrint(
+              '[SessionService] Skipping foreground service — '
+              'notification permission not granted',
+            );
+            return;
+          }
+        }
         await _channel.invokeMethod('startForeground');
       } else {
         await _channel.invokeMethod('stopForeground');

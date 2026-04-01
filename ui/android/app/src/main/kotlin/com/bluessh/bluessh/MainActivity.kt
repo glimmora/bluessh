@@ -1,68 +1,23 @@
 package com.bluessh.bluessh
 
-import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         EngineBridge.registerWith(flutterEngine, applicationContext)
-
-        // Register a separate channel for permission operations
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            "com.bluessh/permissions"
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "checkNotificationPermission" -> {
-                    result.success(hasNotificationPermission())
-                }
-                "requestNotificationPermission" -> {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        requestPermissions(
-                            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                            REQUEST_CODE_NOTIFICATIONS
-                        )
-                        // Return current state; the Dart side re-checks via permission_handler
-                        result.success(hasNotificationPermission())
-                    } else {
-                        result.success(true)
-                    }
-                }
-                else -> result.notImplemented()
-            }
-        }
-    }
-
-    private fun hasNotificationPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
-    }
-
-    companion object {
-        private const val REQUEST_CODE_NOTIFICATIONS = 1001
     }
 }
 
@@ -70,12 +25,13 @@ class MainActivity : FlutterActivity() {
  * Foreground service that keeps the OS from killing the app process
  * while an SSH/VNC/RDP session is active.
  *
- * Lifecycle:
- *   Flutter calls startService() when a session connects.
- *   Flutter calls stopService()  when all sessions disconnect.
+ * CRITICAL: On Android 14+ (API 34+), startForegroundService() MUST be
+ * followed by startForeground() within ~5 seconds or the system kills
+ * the process with ForegroundServiceDidNotStartInTimeException.
  *
- * The service shows a persistent notification so the user knows
- * the app is maintaining a remote connection in the background.
+ * Therefore startForeground() is called IMMEDIATELY in onCreate()
+ * BEFORE any other work.  No try/catch around it — if it fails the
+ * process dies anyway, and catching it only delays the inevitable.
  */
 class SessionForegroundService : Service() {
 
@@ -106,22 +62,24 @@ class SessionForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // ── CRITICAL: call startForeground() FIRST, before anything else ──
+        // The OS gives us ~5 seconds.  Channel must exist before the
+        // notification can be posted, so create it immediately.
         createNotificationChannel()
         val notification = buildNotification()
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start foreground: ${e.message}", e)
-            stopSelf()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
         }
+
+        Log.d(TAG, "Foreground service started successfully")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -132,6 +90,7 @@ class SessionForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "Foreground service destroyed")
     }
 
     private fun createNotificationChannel() {
