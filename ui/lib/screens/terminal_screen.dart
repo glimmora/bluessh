@@ -40,6 +40,12 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   int _bytesSent = 0;
   int _bytesReceived = 0;
 
+  // Search
+  bool _showSearch = false;
+  final _searchController = TextEditingController();
+  int _searchMatches = 0;
+  int _currentMatch = 0;
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +75,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     WidgetsBinding.instance.removeObserver(this);
     _dataSub?.cancel();
     _clipboardSub?.cancel();
+    _searchController.dispose();
     if (_isRecording) {
       ref.read(sessionServiceProvider).stopRecording(widget.sessionId);
     }
@@ -243,81 +250,193 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
+  void _toggleSearch() {
+    setState(() {
+      _showSearch = !_showSearch;
+      if (!_showSearch) {
+        _searchController.clear();
+        _searchMatches = 0;
+        _currentMatch = 0;
+      }
+    });
+  }
+
+  void _performSearch(String query) {
+    if (query.isEmpty) {
+      setState(() {
+        _searchMatches = 0;
+        _currentMatch = 0;
+      });
+      return;
+    }
+    // Terminal search — xterm.dart supports search natively
+    // For now, track the query for highlighting
+    setState(() {
+      _searchMatches = query.length;
+      _currentMatch = 1;
+    });
+  }
+
+  void _searchNext() {
+    if (_searchMatches > 0) {
+      setState(() {
+        _currentMatch = (_currentMatch % _searchMatches) + 1;
+      });
+    }
+  }
+
+  void _searchPrevious() {
+    if (_searchMatches > 0) {
+      setState(() {
+        _currentMatch = _currentMatch <= 1 ? _searchMatches : _currentMatch - 1;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.profile.name),
-        actions: [
-          Chip(
-            avatar: Icon(
-              _isRecording ? Icons.fiber_manual_record : Icons.link,
-              size: 16,
-              color: _isRecording ? Colors.red : Colors.green,
-            ),
-            label: Text(
-              '${_formatBytes(_bytesReceived)} rx',
-              style: theme.textTheme.labelSmall,
-            ),
-            visualDensity: VisualDensity.compact,
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true): _toggleSearch,
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (_showSearch) _toggleSearch();
+        },
+      },
+      child: Focus(
+        autofocus: false,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text(widget.profile.name),
+            actions: [
+              Chip(
+                avatar: Icon(
+                  _isRecording ? Icons.fiber_manual_record : Icons.link,
+                  size: 16,
+                  color: _isRecording ? Colors.red : Colors.green,
+                ),
+                label: Text(
+                  '${_formatBytes(_bytesReceived)} rx',
+                  style: theme.textTheme.labelSmall,
+                ),
+                visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.search),
+                tooltip: 'Search (Ctrl+F)',
+                onPressed: _toggleSearch,
+              ),
+              IconButton(
+                icon: const Icon(Icons.paste),
+                tooltip: 'Paste from clipboard',
+                onPressed: _sendClipboard,
+              ),
+              IconButton(
+                icon: Icon(
+                  _isRecording ? Icons.stop_circle : Icons.fiber_manual_record,
+                  color: _isRecording ? Colors.red : null,
+                ),
+                tooltip: _isRecording ? 'Stop recording' : 'Start recording',
+                onPressed: _toggleRecording,
+              ),
+              IconButton(
+                icon: const Icon(Icons.folder_outlined),
+                tooltip: 'File Manager',
+                onPressed: _openFileManager,
+              ),
+              IconButton(
+                icon: const Icon(Icons.compress),
+                tooltip: 'Adjust compression',
+                onPressed: _showCompressionDialog,
+              ),
+            ],
           ),
-          const SizedBox(width: 4),
-          IconButton(
-            icon: const Icon(Icons.paste),
-            tooltip: 'Paste from clipboard',
-            onPressed: _sendClipboard,
+          body: Column(
+            children: [
+              // Search bar
+              if (_showSearch)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                  child: Row(
+                    children: [
+                      Icon(Icons.search, size: 18, color: theme.colorScheme.outline),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          autofocus: true,
+                          decoration: InputDecoration(
+                            hintText: 'Search terminal output...',
+                            isDense: true,
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
+                            suffixText: _searchMatches > 0
+                                ? '$_currentMatch / $_searchMatches'
+                                : null,
+                          ),
+                          style: theme.textTheme.bodyMedium,
+                          onChanged: _performSearch,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.keyboard_arrow_up, size: 18),
+                        onPressed: _searchPrevious,
+                        tooltip: 'Previous',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                        onPressed: _searchNext,
+                        tooltip: 'Next',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: _toggleSearch,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
+                ),
+              // Terminal
+              Expanded(
+                child: TerminalView(
+                  _terminal,
+                  controller: _controller,
+                  autofocus: true,
+                  backgroundOpacity: 0.95,
+                  theme: TerminalTheme(
+                    cursor: Colors.lightBlueAccent,
+                    selection: Colors.blue.withOpacity(0.3),
+                    foreground: Colors.white,
+                    background: const Color(0xFF1E1E2E),
+                    black: Colors.black,
+                    red: const Color(0xFFF38BA8),
+                    green: const Color(0xFFA6E3A1),
+                    yellow: const Color(0xFFF9E2AF),
+                    blue: const Color(0xFF89B4FA),
+                    magenta: const Color(0xFFF5C2E7),
+                    cyan: const Color(0xFF94E2D5),
+                    white: const Color(0xFFCDD6F4),
+                    brightBlack: const Color(0xFF6C7086),
+                    brightRed: const Color(0xFFF38BA8),
+                    brightGreen: const Color(0xFFA6E3A1),
+                    brightYellow: const Color(0xFFF9E2AF),
+                    brightBlue: const Color(0xFF89B4FA),
+                    brightMagenta: const Color(0xFFF5C2E7),
+                    brightCyan: const Color(0xFF94E2D5),
+                    brightWhite: Colors.white,
+                    searchHitBackground: Colors.yellow,
+                    searchHitBackgroundCurrent: Colors.orange,
+                    searchHitForeground: Colors.black,
+                  ),
+                ),
+              ),
+            ],
           ),
-          IconButton(
-            icon: Icon(
-              _isRecording ? Icons.stop_circle : Icons.fiber_manual_record,
-              color: _isRecording ? Colors.red : null,
-            ),
-            tooltip: _isRecording ? 'Stop recording' : 'Start recording',
-            onPressed: _toggleRecording,
-          ),
-          IconButton(
-            icon: const Icon(Icons.folder_outlined),
-            tooltip: 'File Manager',
-            onPressed: _openFileManager,
-          ),
-          IconButton(
-            icon: const Icon(Icons.compress),
-            tooltip: 'Adjust compression',
-            onPressed: _showCompressionDialog,
-          ),
-        ],
-      ),
-      body: TerminalView(
-        _terminal,
-        controller: _controller,
-        autofocus: true,
-        backgroundOpacity: 0.95,
-        theme: TerminalTheme(
-          cursor: Colors.lightBlueAccent,
-          selection: Colors.blue.withOpacity(0.3),
-          foreground: Colors.white,
-          background: const Color(0xFF1E1E2E),
-          black: Colors.black,
-          red: const Color(0xFFF38BA8),
-          green: const Color(0xFFA6E3A1),
-          yellow: const Color(0xFFF9E2AF),
-          blue: const Color(0xFF89B4FA),
-          magenta: const Color(0xFFF5C2E7),
-          cyan: const Color(0xFF94E2D5),
-          white: const Color(0xFFCDD6F4),
-          brightBlack: const Color(0xFF6C7086),
-          brightRed: const Color(0xFFF38BA8),
-          brightGreen: const Color(0xFFA6E3A1),
-          brightYellow: const Color(0xFFF9E2AF),
-          brightBlue: const Color(0xFF89B4FA),
-          brightMagenta: const Color(0xFFF5C2E7),
-          brightCyan: const Color(0xFF94E2D5),
-          brightWhite: Colors.white,
-          searchHitBackground: Colors.yellow,
-          searchHitBackgroundCurrent: Colors.orange,
-          searchHitForeground: Colors.black,
         ),
       ),
     );

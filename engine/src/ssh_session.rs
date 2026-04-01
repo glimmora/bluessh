@@ -35,6 +35,22 @@ pub struct SshConfig {
     pub password: Option<String>,
     pub key_path: Option<String>,
     pub passphrase: Option<String>,
+    /// Connection timeout in seconds. 0 means use default (30s).
+    pub timeout_secs: u64,
+}
+
+impl Default for SshConfig {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: 22,
+            username: String::new(),
+            password: None,
+            key_path: None,
+            passphrase: None,
+            timeout_secs: 30,
+        }
+    }
 }
 
 /// Handle to an active SSH session.
@@ -85,12 +101,22 @@ pub async fn connect_ssh(config: SshConfig) -> Result<SshSessionHandle, String> 
     };
 
     let addr = (config.host.as_str(), config.port);
+    let timeout = if config.timeout_secs == 0 {
+        std::time::Duration::from_secs(30)
+    } else {
+        std::time::Duration::from_secs(config.timeout_secs)
+    };
 
-    // Step 1+2: TCP connect and SSH handshake
+    // Step 1+2: TCP connect and SSH handshake with timeout
     let ssh_config = Arc::new(russh::client::Config::default());
-    let mut session = russh::client::connect(ssh_config, addr, handler)
-        .await
-        .map_err(|e| format!("SSH connect failed: {e}"))?;
+    let mut session = match tokio::time::timeout(
+        timeout,
+        russh::client::connect(ssh_config, addr, handler),
+    ).await {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => return Err(format!("SSH connect failed: {e}")),
+        Err(_) => return Err(format!("Connection timed out after {}s", config.timeout_secs)),
+    };
 
     let _ = event_tx.send(SessionEvent::Connected);
 

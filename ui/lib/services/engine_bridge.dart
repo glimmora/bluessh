@@ -99,6 +99,13 @@ typedef EngineRecordingStart = int Function(
 typedef EngineRecordingStopC = Int32 Function(Uint64 sessionId);
 typedef EngineRecordingStop = int Function(int sessionId);
 
+typedef EngineKeyGenerateC = Int32 Function(
+    Uint8 keyType, Pointer<Utf8> outputPath, Pointer<Utf8> passphrase,
+    Pointer<Utf8> outPubkey, Size outPubkeyLen);
+typedef EngineKeyGenerate = int Function(
+    int keyType, Pointer<Utf8> outputPath, Pointer<Utf8> passphrase,
+    Pointer<Utf8> outPubkey, int outPubkeyLen);
+
 // ═══════════════════════════════════════════════════════════════════
 //  Protocol Mapping & State Enums
 // ═══════════════════════════════════════════════════════════════════
@@ -165,6 +172,7 @@ class EngineBridge {
   late final EngineAuthMfa _engineAuthMfa;
   late final EngineRecordingStart _engineRecordingStart;
   late final EngineRecordingStop _engineRecordingStop;
+  late final EngineKeyGenerate _engineKeyGenerate;
 
   final _stateController = StreamController<FfiSessionState>.broadcast();
 
@@ -219,6 +227,8 @@ class EngineBridge {
         _engine.lookupFunction<EngineRecordingStartC, EngineRecordingStart>('engine_recording_start');
     _engineRecordingStop =
         _engine.lookupFunction<EngineRecordingStopC, EngineRecordingStop>('engine_recording_stop');
+    _engineKeyGenerate =
+        _engine.lookupFunction<EngineKeyGenerateC, EngineKeyGenerate>('engine_key_generate');
   }
 
   // ── Public API ─────────────────────────────────────────────────
@@ -376,6 +386,35 @@ class EngineBridge {
       return _engineRecordingStop(sessionId);
     } catch (e) {
       return -1;
+    }
+  }
+
+  /// Generates an SSH key pair. Returns the public key string or null on failure.
+  String? generateKey({
+    required int keyType, // 0=Ed25519, 1=ECDSA
+    required String outputPath,
+    String passphrase = '',
+  }) {
+    if (outputPath.isEmpty) return null;
+
+    final pathPtr = outputPath.toNativeUtf8();
+    final passPtr = passphrase.toNativeUtf8();
+    final outBuf = calloc<Utf8>(4096);
+
+    try {
+      final result = _engineKeyGenerate(
+        keyType, pathPtr, passPtr, outBuf, 4096,
+      );
+      if (result == 0) {
+        return outBuf.toDartString();
+      }
+      return null;
+    } catch (e) {
+      return null;
+    } finally {
+      calloc.free(pathPtr);
+      calloc.free(passPtr);
+      calloc.free(outBuf);
     }
   }
 

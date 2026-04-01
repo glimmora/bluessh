@@ -15,6 +15,7 @@ import 'multi_terminal_screen.dart';
 import 'file_manager_screen.dart';
 import 'remote_desktop_screen.dart';
 import 'forwarding_screen.dart';
+import 'recording_playback_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -231,6 +232,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.videocam_outlined),
+            tooltip: 'Recordings',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const RecordingPlaybackScreen()),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.push(

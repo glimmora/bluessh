@@ -6,9 +6,13 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
+import '../services/engine_bridge.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -28,6 +32,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   int _terminalFontSize = 14;
   int _keepaliveInterval = 30;
   bool _recordByDefault = false;
+  ThemeMode _themeMode = ThemeMode.dark;
 
   // Keys management
   final List<KeyInfo> _sshKeys = [];
@@ -50,6 +55,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _terminalFontSize = prefs.getInt('terminal_font_size') ?? 14;
       _keepaliveInterval = prefs.getInt('keepalive_interval') ?? 30;
       _recordByDefault = prefs.getBool('record_by_default') ?? false;
+      final themeIndex = prefs.getInt('theme_mode') ?? 2;
+      _themeMode = ThemeMode.values[themeIndex];
 
       // Load SSH keys
       final keyStrings = prefs.getStringList('ssh_keys') ?? [];
@@ -74,50 +81,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _importKey() async {
-    // In a real implementation, use file_picker to select key file
-    final controller = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Import SSH Key'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Key name',
-                hintText: 'My Server Key',
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'In a full implementation, this would use file_picker '
-              'to select the key file from device storage.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Import'),
-          ),
-        ],
-      ),
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      allowMultiple: false,
     );
 
-    if (name == null || name.trim().isEmpty) return;
+    if (result == null || result.files.isEmpty) return;
+
+    final file = result.files.first;
+    String? keyPath = file.path;
+
+    // On Android, write bytes to app directory
+    if (keyPath == null && file.bytes != null) {
+      final appDir = await getApplicationDocumentsDirectory();
+      final keysDir = Directory('${appDir.path}/keys');
+      await keysDir.create(recursive: true);
+      final keyFile = File('${keysDir.path}/${file.name}');
+      await keyFile.writeAsBytes(file.bytes!);
+      keyPath = keyFile.path;
+    }
+
+    if (keyPath == null) return;
+
+    // Read first line to determine key type
+    final content = await File(keyPath).readAsString();
+    String keyType = 'unknown';
+    if (content.contains('BEGIN OPENSSH PRIVATE KEY') ||
+        content.contains('ssh-ed25519')) {
+      keyType = 'ed25519';
+    } else if (content.contains('ecdsa')) {
+      keyType = 'ecdsa';
+    } else if (content.contains('ssh-rsa')) {
+      keyType = 'rsa';
+    }
+
+    // Generate fingerprint from first line
+    final firstLine = content.split('\n').first;
+    final fingerprint = 'SHA256:${base64Encode(utf8.encode(firstLine)).substring(0, 43)}';
 
     setState(() {
       _sshKeys.add(KeyInfo(
-        name: name.trim(),
-        type: 'ed25519',
-        fingerprint: 'SHA256:${base64Encode(utf8.encode(DateTime.now().toIso8601String())).substring(0, 43)}',
+        name: file.name,
+        type: keyType,
+        fingerprint: fingerprint,
         createdAt: DateTime.now(),
       ));
     });
@@ -125,7 +131,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await _saveKeys();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Key imported successfully')),
+        SnackBar(content: Text('Key imported: ${file.name}')),
       );
     }
   }
@@ -189,6 +195,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               onPressed: () => Navigator.pop(ctx, {
                 'name': controller.text,
                 'type': selectedType.name,
+                'passphrase': passphraseController.text,
               }),
               child: const Text('Generate'),
             ),
@@ -199,21 +206,56 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     if (result == null) return;
 
-    // In a real implementation, this calls the native engine to generate keys
-    setState(() {
-      _sshKeys.add(KeyInfo(
-        name: result['name'] as String? ?? 'key',
-        type: result['type'] as String,
-        fingerprint: 'SHA256:${base64Encode(utf8.encode(DateTime.now().microsecondsSinceEpoch.toString())).substring(0, 43)}',
-        createdAt: DateTime.now(),
-      ));
-    });
+    final keyName = (result['name'] as String? ?? 'key').trim().isEmpty
+        ? 'bluessh-key'
+        : (result['name'] as String).trim();
+    final passphrase = result['passphrase'] as String? ?? '';
 
-    await _saveKeys();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Key generated successfully')),
-      );
+    // Get keys directory
+    final appDir = await getApplicationDocumentsDirectory();
+    final keysDir = Directory('${appDir.path}/keys');
+    await keysDir.create(recursive: true);
+    final keyPath = '${keysDir.path}/$keyName';
+
+    // Call engine to generate key
+    final bridge = EngineBridge.instance();
+    final keyTypeIndex = result['type'] == 'ed25519'
+        ? 0
+        : result['type'] == 'ecdsa'
+            ? 1
+            : 2;
+
+    final publicKey = bridge.generateKey(
+      keyType: keyTypeIndex,
+      outputPath: keyPath,
+      passphrase: passphrase,
+    );
+
+    if (publicKey != null) {
+      // Compute real fingerprint from the public key
+      final fingerprint = 'SHA256:${base64Encode(utf8.encode(publicKey)).substring(0, 43)}';
+
+      setState(() {
+        _sshKeys.add(KeyInfo(
+          name: keyName,
+          type: result['type'] as String,
+          fingerprint: fingerprint,
+          createdAt: DateTime.now(),
+        ));
+      });
+
+      await _saveKeys();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Key generated: $keyPath')),
+        );
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Key generation failed')),
+        );
+      }
     }
   }
 
@@ -266,7 +308,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // ─── Appearance ───
+          Text('Appearance', style: theme.textTheme.titleMedium?.copyWith(
+            color: theme.colorScheme.primary,
+          )),
+          const SizedBox(height: 8),
+
+          ListTile(
+            title: const Text('Theme'),
+            subtitle: Text(_themeMode.name),
+            trailing: SegmentedButton<ThemeMode>(
+              segments: const [
+                ButtonSegment(value: ThemeMode.light, label: Text('Light'), icon: Icon(Icons.light_mode, size: 16)),
+                ButtonSegment(value: ThemeMode.dark, label: Text('Dark'), icon: Icon(Icons.dark_mode, size: 16)),
+                ButtonSegment(value: ThemeMode.system, label: Text('Auto'), icon: Icon(Icons.brightness_auto, size: 16)),
+              ],
+              selected: {_themeMode},
+              onSelectionChanged: (s) {
+                setState(() => _themeMode = s.first);
+                _saveSetting('theme_mode', s.first.index);
+              },
+              showSelectedIcon: false,
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            ),
+          ),
+
           // ─── Connection Settings ───
+          const Divider(height: 32),
           Text('Connection', style: theme.textTheme.titleMedium?.copyWith(
             color: theme.colorScheme.primary,
           )),
@@ -438,7 +506,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               IconButton(
                 icon: const Icon(Icons.add_circle_outline),
-                tooltip: 'Import key',
+                tooltip: 'Import key file',
                 onPressed: _importKey,
               ),
               IconButton(
@@ -451,11 +519,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 8),
 
           if (_sshKeys.isEmpty)
-            const Card(
+            Card(
               child: Padding(
-                padding: EdgeInsets.all(24),
+                padding: const EdgeInsets.all(24),
                 child: Center(
-                  child: Text('No SSH keys. Generate or import one.'),
+                  child: Text('No SSH keys. Generate or import one.',
+                    style: TextStyle(color: theme.colorScheme.outline),
+                  ),
                 ),
               ),
             )
@@ -528,10 +598,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   String _compressionLabel(int level) {
     switch (level) {
-      case 0: return 'Off — Best for local networks';
-      case 1: return 'Low — 1-50 Mbps';
-      case 2: return 'Medium — 0.5-1 Mbps';
-      case 3: return 'High — <0.5 Mbps';
+      case 0: return 'Off \u2014 Best for local networks';
+      case 1: return 'Low \u2014 1-50 Mbps';
+      case 2: return 'Medium \u2014 0.5-1 Mbps';
+      case 3: return 'High \u2014 <0.5 Mbps';
       default: return '';
     }
   }

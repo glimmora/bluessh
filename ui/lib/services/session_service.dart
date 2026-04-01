@@ -154,7 +154,13 @@ class SessionService {
         'protocol': protocolToEngineValue(profile.protocol),
         'compressLevel': profile.compressionLevel,
         'recordSession': profile.recordSession,
-      });
+      }).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          debugPrint('[SessionService] Connect timed out after 30s');
+          return 0;
+        },
+      );
 
       if (sessionId != null && sessionId > 0) {
         _startKeepalive(sessionId);
