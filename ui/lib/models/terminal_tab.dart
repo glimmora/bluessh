@@ -1,6 +1,7 @@
 /// Terminal tab model for multi-tab support.
 library;
 
+import 'dart:async';
 import 'package:xterm/xterm.dart';
 import '../models/host_profile.dart';
 
@@ -14,6 +15,9 @@ class TerminalTab {
   final TerminalController controller;
   DateTime createdAt;
 
+  /// Stream subscription for terminal data — must be cancelled on tab close.
+  StreamSubscription? dataSubscription;
+
   TerminalTab({
     required this.id,
     required this.title,
@@ -23,4 +27,10 @@ class TerminalTab {
     required this.controller,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
+
+  /// Cancels the data subscription to prevent memory leaks.
+  void dispose() {
+    dataSubscription?.cancel();
+    dataSubscription = null;
+  }
 }

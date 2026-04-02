@@ -36,6 +36,13 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
   int _frameHeight = 1080;
   ui.Image? _currentImage;
 
+  // Stream subscriptions
+  StreamSubscription<SessionEvent>? _eventSub;
+  StreamSubscription<ClipboardEvent>? _clipboardSub;
+
+  // Keyboard focus
+  late final FocusNode _focusNode;
+
   // Multi-monitor support
   final List<MonitorRect> _monitors = [const MonitorRect(0, 0, 1920, 1080)];
   int _activeMonitor = 0;
@@ -66,6 +73,7 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
   @override
   void initState() {
     super.initState();
+    _focusNode = FocusNode();
     _listenForSessionEvents();
   }
 
@@ -75,6 +83,9 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
       ref.read(sessionServiceProvider).stopRecording(widget.sessionId);
     }
     ref.read(sessionServiceProvider).disconnect(widget.sessionId);
+    _eventSub?.cancel();
+    _clipboardSub?.cancel();
+    _focusNode.dispose();
     _currentImage?.dispose();
     super.dispose();
   }
@@ -82,10 +93,10 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
   void _listenForSessionEvents() {
     final sessionService = ref.read(sessionServiceProvider);
 
-    // Listen for frame data (VNC/RDP)
-    sessionService.events
+    _eventSub = sessionService.events
         .where((e) => e.sessionId == widget.sessionId)
         .listen((event) {
+      if (!mounted) return;
       switch (event.type) {
         case 'frame_data':
           _updateFrame(event.data);
@@ -98,11 +109,23 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
       }
     });
 
-    // Clipboard sync
     if (_clipboardSync) {
-      sessionService.clipboardEvents
+      _clipboardSub = sessionService.clipboardEvents
           .where((e) => e.sessionId == widget.sessionId)
           .listen((event) {
+        if (!mounted) return;
+        final text = String.fromCharCodes(event.data);
+        Clipboard.setData(ClipboardData(text: text));
+      });
+    }
+  }
+    });
+
+    if (_clipboardSync) {
+      _clipboardSub = sessionService.clipboardEvents
+          .where((e) => e.sessionId == widget.sessionId)
+          .listen((event) {
+        if (!mounted) return;
         final text = String.fromCharCodes(event.data);
         Clipboard.setData(ClipboardData(text: text));
       });
@@ -462,7 +485,7 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
             )
           : null,
       body: KeyboardListener(
-        focusNode: FocusNode(),
+        focusNode: _focusNode,
         autofocus: true,
         onKeyEvent: _sendKeyEvent,
         child: GestureDetector(

@@ -58,7 +58,7 @@ class TabManager extends ChangeNotifier {
     };
 
     // Listen for incoming data
-    sessionService.terminalData
+    tab.dataSubscription = sessionService.terminalData
         .where((e) => e.sessionId == sessionId)
         .listen((event) {
       final text = String.fromCharCodes(event.data);

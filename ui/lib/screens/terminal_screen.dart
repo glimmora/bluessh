@@ -35,6 +35,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   late final Terminal _terminal;
   late final TerminalController _controller;
   StreamSubscription<TerminalDataEvent>? _dataSub;
+  StreamSubscription<SessionEvent>? _eventSub;
   StreamSubscription<ClipboardEvent>? _clipboardSub;
   bool _isRecording = false;
   int _bytesSent = 0;
@@ -74,6 +75,7 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _dataSub?.cancel();
+    _eventSub?.cancel();
     _clipboardSub?.cancel();
     _searchController.dispose();
     if (_isRecording) {
@@ -123,10 +125,11 @@ class _TerminalScreenState extends ConsumerState<TerminalScreen>
       },
     );
 
-    sessionService.events
+    _eventSub = sessionService.events
         .where((e) => e.sessionId == widget.sessionId)
         .listen(
       (event) {
+        if (!mounted) return;
         if (event.type == 'disconnected') {
           _terminal.write('\r\n\x1b[31m--- Connection lost ---\x1b[0m\r\n');
         } else if (event.type == 'reconnected') {
