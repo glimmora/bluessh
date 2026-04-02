@@ -1,6 +1,7 @@
 package com.bluessh.bluessh
 
 import android.content.Context
+import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -24,9 +25,24 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
 
     companion object {
         private const val CHANNEL_NAME = "com.bluessh/engine"
+        private const val TAG = "EngineBridge"
+
+        /** True if the native library loaded successfully. */
+        var isLoaded: Boolean = false
+            private set
 
         init {
-            System.loadLibrary("bluessh")
+            try {
+                System.loadLibrary("bluessh")
+                isLoaded = true
+                Log.i(TAG, "Native library loaded successfully")
+            } catch (e: UnsatisfiedLinkError) {
+                isLoaded = false
+                Log.e(TAG, "Failed to load native library: ${e.message}", e)
+            } catch (e: Exception) {
+                isLoaded = false
+                Log.e(TAG, "Unexpected error loading native library: ${e.message}", e)
+            }
         }
 
         /** Registers this handler on the given Flutter engine's method channel. */
@@ -125,14 +141,40 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
     // ─── MethodChannel Dispatch ───────────────────────────────────────
 
     override fun onMethodCall(call: MethodCall, result: Result) {
+        // Guard: if the native library failed to load, reject all calls
+        if (!isLoaded) {
+            result.error(
+                "NATIVE_LIBRARY_MISSING",
+                "Native library (libbluessh.so) failed to load. Check ABI compatibility.",
+                null
+            )
+            return
+        }
+
         try {
             when (call.method) {
-                "init" -> result.success(nativeInit())
-                "shutdown" -> result.success(nativeShutdown())
+                "init" -> {
+                    val rc = nativeInit()
+                    result.success(rc)
+                }
+                "shutdown" -> {
+                    val rc = nativeShutdown()
+                    result.success(rc)
+                }
                 "connect" -> {
+                    val host = call.argument<String>("host")
+                    if (host.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Host cannot be empty", null)
+                        return
+                    }
+                    val port = call.argument<Int>("port") ?: 22
+                    if (port !in 1..65535) {
+                        result.error("INVALID_INPUT", "Port must be 1-65535", null)
+                        return
+                    }
                     val sessionId = nativeConnect(
-                        call.argument<String>("host") ?: "",
-                        call.argument<Int>("port") ?: 22,
+                        host,
+                        port,
                         call.argument<Int>("protocol") ?: 0,
                         call.argument<Int>("compressLevel") ?: 2,
                         call.argument<Boolean>("recordSession") ?: false,
@@ -140,129 +182,193 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
                     )
                     result.success(sessionId)
                 }
-                "disconnect" -> result.success(
-                    nativeDisconnect(call.argument<Int>("sessionId")?.toLong() ?: 0L)
-                )
-                "write" -> {
-                    val data = call.argument<ByteArray>("data") ?: byteArrayOf()
-                    result.success(
-                        nativeWrite(call.argument<Int>("sessionId")?.toLong() ?: 0L, data)
-                    )
+                "disconnect" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    if (sid == 0L) {
+                        result.error("INVALID_INPUT", "Session ID required", null)
+                        return
+                    }
+                    result.success(nativeDisconnect(sid))
                 }
-                "resize" -> result.success(
-                    nativeResize(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<Int>("cols") ?: 80,
-                        call.argument<Int>("rows") ?: 24
-                    )
-                )
-                "authPassword" -> result.success(
-                    nativeAuthPassword(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("password") ?: ""
-                    )
-                )
-                "authKey" -> result.success(
-                    nativeAuthKey(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("keyPath") ?: ""
-                    )
-                )
-                "authKeyData" -> result.success(
-                    nativeAuthKeyData(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<ByteArray>("keyData") ?: byteArrayOf(),
-                        call.argument<String>("passphrase") ?: ""
-                    )
-                )
-                "authMfa" -> result.success(
-                    nativeAuthMfa(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("code") ?: ""
-                    )
-                )
-                "sftpList" -> result.success(
-                    nativeSftpList(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("path") ?: "/"
-                    )
-                )
-                "sftpUpload" -> result.success(
-                    nativeSftpUpload(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("localPath") ?: "",
-                        call.argument<String>("remotePath") ?: ""
-                    )
-                )
-                "sftpDownload" -> result.success(
-                    nativeSftpDownload(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("remotePath") ?: "",
-                        call.argument<String>("localPath") ?: ""
-                    )
-                )
-                "sftpMkdir" -> result.success(
-                    nativeSftpMkdir(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("path") ?: ""
-                    )
-                )
-                "sftpDelete" -> result.success(
-                    nativeSftpDelete(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("path") ?: ""
-                    )
-                )
-                "sftpRename" -> result.success(
-                    nativeSftpRename(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("oldPath") ?: "",
-                        call.argument<String>("newPath") ?: ""
-                    )
-                )
-                "clipboardSet" -> result.success(
-                    nativeClipboardSet(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<ByteArray>("data") ?: byteArrayOf()
-                    )
-                )
-                "clipboardGet" -> result.success(nativeClipboardGet(0L))
-                "recordingStart" -> result.success(
-                    nativeRecordingStart(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<String>("path") ?: ""
-                    )
-                )
-                "recordingStop" -> result.success(
-                    nativeRecordingStop(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L
-                    )
-                )
-                "setCompression" -> result.success(
-                    nativeSetCompression(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L,
-                        call.argument<Int>("level") ?: 2
-                    )
-                )
-                "getSessionState" -> result.success(
-                    nativeGetSessionState(
-                        call.argument<Int>("sessionId")?.toLong() ?: 0L
-                    )
-                )
+                "write" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val data = call.argument<ByteArray>("data") ?: byteArrayOf()
+                    if (sid == 0L || data.isEmpty()) {
+                        result.error("INVALID_INPUT", "Session ID and data required", null)
+                        return
+                    }
+                    result.success(nativeWrite(sid, data))
+                }
+                "resize" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val cols = call.argument<Int>("cols") ?: 80
+                    val rows = call.argument<Int>("rows") ?: 24
+                    if (cols <= 0 || rows <= 0) {
+                        result.error("INVALID_INPUT", "Cols and rows must be positive", null)
+                        return
+                    }
+                    result.success(nativeResize(sid, cols, rows))
+                }
+                "authPassword" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val password = call.argument<String>("password")
+                    if (sid == 0L || password.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Session ID and password required", null)
+                        return
+                    }
+                    result.success(nativeAuthPassword(sid, password))
+                }
+                "authKey" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val keyPath = call.argument<String>("keyPath")
+                    if (sid == 0L || keyPath.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Session ID and key path required", null)
+                        return
+                    }
+                    result.success(nativeAuthKey(sid, keyPath))
+                }
+                "authKeyData" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val keyData = call.argument<ByteArray>("keyData") ?: byteArrayOf()
+                    if (sid == 0L || keyData.isEmpty()) {
+                        result.error("INVALID_INPUT", "Session ID and key data required", null)
+                        return
+                    }
+                    result.success(nativeAuthKeyData(sid, keyData, call.argument<String>("passphrase") ?: ""))
+                }
+                "authMfa" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val code = call.argument<String>("code")
+                    if (sid == 0L || code.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Session ID and MFA code required", null)
+                        return
+                    }
+                    result.success(nativeAuthMfa(sid, code))
+                }
+                "sftpList" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val path = call.argument<String>("path") ?: "/"
+                    if (sid == 0L) {
+                        result.error("INVALID_INPUT", "Session ID required", null)
+                        return
+                    }
+                    result.success(nativeSftpList(sid, path))
+                }
+                "sftpUpload" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val local = call.argument<String>("localPath")
+                    val remote = call.argument<String>("remotePath")
+                    if (sid == 0L || local.isNullOrBlank() || remote.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Session ID, local and remote paths required", null)
+                        return
+                    }
+                    result.success(nativeSftpUpload(sid, local, remote))
+                }
+                "sftpDownload" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val remote = call.argument<String>("remotePath")
+                    val local = call.argument<String>("localPath")
+                    if (sid == 0L || remote.isNullOrBlank() || local.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Session ID, remote and local paths required", null)
+                        return
+                    }
+                    result.success(nativeSftpDownload(sid, remote, local))
+                }
+                "sftpMkdir" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val path = call.argument<String>("path")
+                    if (sid == 0L || path.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Session ID and path required", null)
+                        return
+                    }
+                    result.success(nativeSftpMkdir(sid, path))
+                }
+                "sftpDelete" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val path = call.argument<String>("path")
+                    if (sid == 0L || path.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Session ID and path required", null)
+                        return
+                    }
+                    result.success(nativeSftpDelete(sid, path))
+                }
+                "sftpRename" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val oldPath = call.argument<String>("oldPath")
+                    val newPath = call.argument<String>("newPath")
+                    if (sid == 0L || oldPath.isNullOrBlank() || newPath.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Session ID, old and new paths required", null)
+                        return
+                    }
+                    result.success(nativeSftpRename(sid, oldPath, newPath))
+                }
+                "clipboardSet" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val data = call.argument<ByteArray>("data") ?: byteArrayOf()
+                    result.success(nativeClipboardSet(sid, data))
+                }
+                "clipboardGet" -> {
+                    result.success(nativeClipboardGet(0L))
+                }
+                "recordingStart" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val path = call.argument<String>("path")
+                    if (sid == 0L || path.isNullOrBlank()) {
+                        result.error("INVALID_INPUT", "Session ID and path required", null)
+                        return
+                    }
+                    result.success(nativeRecordingStart(sid, path))
+                }
+                "recordingStop" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    if (sid == 0L) {
+                        result.error("INVALID_INPUT", "Session ID required", null)
+                        return
+                    }
+                    result.success(nativeRecordingStop(sid))
+                }
+                "setCompression" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    val level = call.argument<Int>("level") ?: 2
+                    if (sid == 0L) {
+                        result.error("INVALID_INPUT", "Session ID required", null)
+                        return
+                    }
+                    result.success(nativeSetCompression(sid, level))
+                }
+                "getSessionState" -> {
+                    val sid = call.argument<Int>("sessionId")?.toLong() ?: 0L
+                    if (sid == 0L) {
+                        result.error("INVALID_INPUT", "Session ID required", null)
+                        return
+                    }
+                    result.success(nativeGetSessionState(sid))
+                }
                 "getVersion" -> result.success(nativeGetVersion())
                 "getAppDir" -> result.success(context.filesDir.absolutePath)
                 "startForeground" -> {
-                    SessionForegroundService.start(context)
-                    result.success(0)
+                    try {
+                        SessionForegroundService.start(context)
+                        result.success(0)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to start foreground service: ${e.message}", e)
+                        result.error("FOREGROUND_SERVICE_ERROR", e.message, null)
+                    }
                 }
                 "stopForeground" -> {
-                    SessionForegroundService.stop(context)
-                    result.success(0)
+                    try {
+                        SessionForegroundService.stop(context)
+                        result.success(0)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to stop foreground service: ${e.message}", e)
+                        result.error("FOREGROUND_SERVICE_ERROR", e.message, null)
+                    }
                 }
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
-            result.error("NATIVE_ERROR", e.message, null)
+            Log.e(TAG, "Unhandled error in method '${call.method}': ${e.message}", e)
+            result.error("NATIVE_ERROR", e.message, e.stackTraceToString())
         }
     }
 }

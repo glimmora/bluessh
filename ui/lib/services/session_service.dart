@@ -41,9 +41,6 @@ final transferProgressProvider =
 /// Default 30s — overridden by user's 'keepalive_interval' setting.
 Duration _keepaliveInterval = const Duration(seconds: 30);
 
-/// Interval between reconnection attempts.
-const Duration _reconnectInterval = Duration(seconds: 5);
-
 /// Maximum exponent for exponential backoff (2^5 = 32 seconds).
 const int _maxBackoffExponent = 5;
 
@@ -118,6 +115,7 @@ class SessionService {
             type: state,
             data: call.arguments,
           ));
+          break;
         case 'onTerminalData':
           final sessionId = call.arguments['sessionId'] as int;
           final data = call.arguments['data'] as Uint8List;
@@ -125,8 +123,10 @@ class SessionService {
             sessionId: sessionId,
             data: data,
           ));
+          break;
         case 'onSftpProgress':
           _sftpController.add(SftpEvent.fromJson(call.arguments));
+          break;
         case 'onClipboardUpdate':
           final sessionId = call.arguments['sessionId'] as int;
           final data = call.arguments['data'] as Uint8List;
@@ -134,6 +134,7 @@ class SessionService {
             sessionId: sessionId,
             data: data,
           ));
+          break;
         case 'onAuthChallenge':
           final sessionId = call.arguments['sessionId'] as int;
           final methods = (call.arguments['methods'] as List).cast<String>();
@@ -141,6 +142,7 @@ class SessionService {
             sessionId: sessionId,
             methods: methods,
           ));
+          break;
       }
     });
   }
@@ -176,6 +178,9 @@ class SessionService {
         return sessionId;
       }
       return 0;
+    } on PlatformException catch (e) {
+      debugPrint('[SessionService] Connect platform error: ${e.code} — ${e.message}');
+      return 0;
     } catch (e) {
       debugPrint('[SessionService] Connect failed: $e');
       return 0;
@@ -209,6 +214,10 @@ class SessionService {
             }) ??
             -1;
       }
+      debugPrint('[SessionService] No authentication method available');
+      return -1;
+    } on PlatformException catch (e) {
+      debugPrint('[SessionService] Auth platform error: ${e.code} — ${e.message}');
       return -1;
     } catch (e) {
       debugPrint('[SessionService] Auth failed: $e');
@@ -241,6 +250,9 @@ class SessionService {
             'sessionId': sessionId,
           }) ??
           -1;
+    } on PlatformException catch (e) {
+      debugPrint('[SessionService] Disconnect platform error: ${e.code} — ${e.message}');
+      return -1;
     } catch (e) {
       debugPrint('[SessionService] Disconnect failed: $e');
       return -1;
@@ -521,9 +533,9 @@ class SessionService {
           try {
             final newSessionId = await connect(profile);
             if (newSessionId > 0) {
-              _reconnectTimers.remove(sessionId);
               final authResult = await authenticate(newSessionId, profile);
               if (authResult == 0) {
+                _reconnectTimers.remove(sessionId);
                 _eventController.add(SessionEvent(
                   sessionId: newSessionId,
                   type: 'reconnected',
@@ -533,9 +545,12 @@ class SessionService {
                   },
                 ));
               } else {
+                // Auth failed — clean up the new session and retry
+                await disconnect(newSessionId);
                 scheduleNext();
               }
             } else {
+              // Connect failed — retry
               scheduleNext();
             }
           } catch (e) {
@@ -595,9 +610,13 @@ class SessionService {
     for (final timer in _keepaliveTimers.values) {
       timer.cancel();
     }
+    _keepaliveTimers.clear();
     for (final timer in _reconnectTimers.values) {
       timer.cancel();
     }
+    _reconnectTimers.clear();
+    _activeSessionCount = 0;
+    _updateForegroundService();
     _eventController.close();
     _terminalDataController.close();
     _sftpController.close();
@@ -676,7 +695,7 @@ class ClipboardEvent {
   });
 }
 
-/// Authentication challenge requiring user input (e.g. MFA code).
+/// Authentication challenge requiring user input (e.g. MFA codes).
 class AuthEvent {
   final int sessionId;
   final List<String> methods;

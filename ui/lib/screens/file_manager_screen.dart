@@ -55,22 +55,30 @@ class _FileManagerScreenState extends ConsumerState<FileManagerScreen> {
       _selectedItems.clear();
     });
 
-    final sessionService = ref.read(sessionServiceProvider);
-    final entries = await sessionService.sftpList(widget.sessionId, path);
+    try {
+      final sessionService = ref.read(sessionServiceProvider);
+      final entries = await sessionService.sftpList(widget.sessionId, path);
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    setState(() {
-      _currentPath = path;
-      _pathController.text = path;
-      _entries = entries
-        ..sort((a, b) {
-          if (a.isDirectory && !b.isDirectory) return -1;
-          if (!a.isDirectory && b.isDirectory) return 1;
-          return a.name.compareTo(b.name);
-        });
-      _isLoading = false;
-    });
+      setState(() {
+        _currentPath = path;
+        _pathController.text = path;
+        _entries = entries
+          ..sort((a, b) {
+            if (a.isDirectory && !b.isDirectory) return -1;
+            if (!a.isDirectory && b.isDirectory) return 1;
+            return a.name.compareTo(b.name);
+          });
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to list directory: $e')),
+      );
+    }
   }
 
   void _navigateUp() {
@@ -101,104 +109,118 @@ class _FileManagerScreenState extends ConsumerState<FileManagerScreen> {
   }
 
   Future<void> _uploadFile() async {
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      withData: true,
-    );
-
-    if (result == null || result.files.isEmpty) return;
-
-    final sessionService = ref.read(sessionServiceProvider);
-
-    for (final file in result.files) {
-      if (!mounted) return;
-
-      final remotePath = '$_currentPath/${file.name}';
-
-      // Show progress indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              Text('Uploading ${file.name}...'),
-            ],
-          ),
-        ),
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        withData: true,
       );
 
-      // Upload via path (desktop) or data (Android)
-      if (file.path != null) {
-        await sessionService.sftpUpload(
-          widget.sessionId,
-          file.path!,
-          remotePath,
+      if (result == null || result.files.isEmpty) return;
+
+      final sessionService = ref.read(sessionServiceProvider);
+
+      for (final file in result.files) {
+        if (!mounted) return;
+
+        final remotePath = '$_currentPath/${file.name}';
+
+        // Show progress indicator
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                Text('Uploading ${file.name}...'),
+              ],
+            ),
+          ),
         );
-      } else if (file.bytes != null) {
-        // On Android, write bytes to temp file then upload
-        final tempDir = await Directory.systemTemp.createTemp('bluessh_upload');
-        final tempFile = File('${tempDir.path}/${file.name}');
-        await tempFile.writeAsBytes(file.bytes!);
-        await sessionService.sftpUpload(
-          widget.sessionId,
-          tempFile.path,
-          remotePath,
+
+        // Upload via path (desktop) or data (Android)
+        if (file.path != null) {
+          await sessionService.sftpUpload(
+            widget.sessionId,
+            file.path!,
+            remotePath,
+          );
+        } else if (file.bytes != null) {
+          // On Android, write bytes to temp file then upload
+          final tempDir = await Directory.systemTemp.createTemp('bluessh_upload');
+          final tempFile = File('${tempDir.path}/${file.name}');
+          await tempFile.writeAsBytes(file.bytes!);
+          await sessionService.sftpUpload(
+            widget.sessionId,
+            tempFile.path,
+            remotePath,
+          );
+          await tempFile.delete();
+          await tempDir.delete();
+        }
+
+        if (!mounted) return;
+        Navigator.pop(context); // dismiss progress
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Uploaded: ${file.name}')),
         );
-        await tempFile.delete();
-        await tempDir.delete();
       }
 
+      _loadDirectory(_currentPath);
+    } catch (e) {
       if (!mounted) return;
-      Navigator.pop(context); // dismiss progress
-
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Uploaded: ${file.name}')),
+        SnackBar(content: Text('Upload failed: $e')),
       );
     }
-
-    _loadDirectory(_currentPath);
   }
 
   Future<void> _downloadFile(SftpFileEntry entry) async {
     if (entry.isDirectory) return;
 
-    final sessionService = ref.read(sessionServiceProvider);
-    final appDir = await sessionService.getAppDir();
-    final localPath = '$appDir/downloads/${entry.name}';
+    try {
+      final sessionService = ref.read(sessionServiceProvider);
+      final appDir = await sessionService.getAppDir();
+      final localPath = '$appDir/downloads/${entry.name}';
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => const AlertDialog(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('Downloading...'),
-          ],
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => const AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Downloading...'),
+            ],
+          ),
         ),
-      ),
-    );
+      );
 
-    await sessionService.sftpDownload(
-      widget.sessionId,
-      entry.path,
-      localPath,
-    );
+      await sessionService.sftpDownload(
+        widget.sessionId,
+        entry.path,
+        localPath,
+      );
 
-    if (!mounted) return;
-    Navigator.pop(context);
+      if (!mounted) return;
+      Navigator.pop(context);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Downloaded to $localPath')),
-    );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Downloaded to $localPath')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download failed: $e')),
+      );
+    }
   }
 
   Future<void> _createDirectory() async {
@@ -230,16 +252,24 @@ class _FileManagerScreenState extends ConsumerState<FileManagerScreen> {
 
     if (name == null || name.trim().isEmpty) return;
 
-    final newPath = '$_currentPath${_currentPath.endsWith('/') ? '' : '/'}'
-        '${name.trim()}';
-    final sessionService = ref.read(sessionServiceProvider);
-    await sessionService.sftpMkdir(widget.sessionId, newPath);
+    try {
+      final newPath = '$_currentPath${_currentPath.endsWith('/') ? '' : '/'}'
+          '${name.trim()}';
+      final sessionService = ref.read(sessionServiceProvider);
+      await sessionService.sftpMkdir(widget.sessionId, newPath);
 
-    if (mounted) {
-      _loadDirectory(_currentPath);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Created directory: $name')),
-      );
+      if (mounted) {
+        _loadDirectory(_currentPath);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Created directory: $name')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create directory: $e')),
+        );
+      }
     }
   }
 
@@ -271,16 +301,24 @@ class _FileManagerScreenState extends ConsumerState<FileManagerScreen> {
 
     if (confirmed != true) return;
 
-    final sessionService = ref.read(sessionServiceProvider);
-    for (final path in _selectedItems) {
-      await sessionService.sftpDelete(widget.sessionId, path);
-    }
+    try {
+      final sessionService = ref.read(sessionServiceProvider);
+      for (final path in _selectedItems) {
+        await sessionService.sftpDelete(widget.sessionId, path);
+      }
 
-    if (mounted) {
-      _loadDirectory(_currentPath);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Deleted selected items')),
-      );
+      if (mounted) {
+        _loadDirectory(_currentPath);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Deleted selected items')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Delete failed: $e')),
+        );
+      }
     }
   }
 
@@ -310,16 +348,24 @@ class _FileManagerScreenState extends ConsumerState<FileManagerScreen> {
 
     if (newName == null || newName.trim().isEmpty) return;
 
-    final parentPath = _currentPath.endsWith('/')
-        ? _currentPath.substring(0, _currentPath.length - 1)
-        : _currentPath;
-    final lastSlash = parentPath.lastIndexOf('/');
-    final newPath = '${parentPath.substring(0, lastSlash + 1)}${newName.trim()}';
+    try {
+      final parentPath = _currentPath.endsWith('/')
+          ? _currentPath.substring(0, _currentPath.length - 1)
+          : _currentPath;
+      final lastSlash = parentPath.lastIndexOf('/');
+      final newPath = '${parentPath.substring(0, lastSlash + 1)}${newName.trim()}';
 
-    final sessionService = ref.read(sessionServiceProvider);
-    await sessionService.sftpRename(widget.sessionId, entry.path, newPath);
+      final sessionService = ref.read(sessionServiceProvider);
+      await sessionService.sftpRename(widget.sessionId, entry.path, newPath);
 
-    if (mounted) _loadDirectory(_currentPath);
+      if (mounted) _loadDirectory(_currentPath);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Rename failed: $e')),
+        );
+      }
+    }
   }
 
   @override

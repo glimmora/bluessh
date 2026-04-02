@@ -106,6 +106,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
 
+    // ── Step 1: Validate input ─────────────────────────────────
+    if (profile.host.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Host address is required')),
+      );
+      return;
+    }
+    if (profile.port < 1 || profile.port > 65535) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Port must be between 1 and 65535')),
+      );
+      return;
+    }
+    if (profile.protocol == ProtocolType.ssh && profile.username.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username is required for SSH connections')),
+      );
+      return;
+    }
+    if (profile.password == null && profile.keyPath == null && profile.keyData == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password or SSH key is required')),
+      );
+      return;
+    }
+
     final sessionService = ref.read(sessionServiceProvider);
 
     showDialog(
@@ -130,7 +160,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     if (sessionId <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connection failed')),
+        SnackBar(
+          content: Text('Failed to connect to ${profile.host}:${profile.port}'),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _connectToHost(profile),
+          ),
+        ),
       );
       return;
     }
@@ -169,10 +205,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       );
     } else {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Authentication failed')),
-      );
       await sessionService.disconnect(sessionId);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Authentication failed for ${profile.username}@${profile.host}'),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _connectToHost(profile),
+          ),
+        ),
+      );
     }
   }
 
@@ -475,10 +517,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final sshProfile = profile.copyWith(protocol: ProtocolType.ssh);
     final sessionId = await sessionService.connect(sshProfile);
 
-    if (sessionId <= 0 || !mounted) return;
+    if (sessionId <= 0 || !mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to connect to ${profile.host}:${profile.port} for SFTP'),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _openFileManager(profile),
+          ),
+        ),
+      );
+      return;
+    }
 
     final authResult = await sessionService.authenticate(sessionId, sshProfile);
-    if (authResult != 0 || !mounted) return;
+    if (authResult != 0 || !mounted) {
+      await sessionService.disconnect(sessionId);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Authentication failed for SFTP on ${profile.host}'),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _openFileManager(profile),
+          ),
+        ),
+      );
+      return;
+    }
 
     Navigator.of(context).push(
       MaterialPageRoute(
