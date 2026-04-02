@@ -495,10 +495,19 @@ class _FileManagerScreenState extends ConsumerState<FileManagerScreen> {
                               onDownload: entry.isDirectory ? null : () => _downloadFile(entry),
                               onRename: () => _renameItem(entry),
                               onDelete: () async {
-                                final sessionService = ref.read(sessionServiceProvider);
-                                await sessionService.sftpDelete(
-                                    widget.sessionId, entry.path);
-                                _loadDirectory(_currentPath);
+                                try {
+                                  final sessionService = ref.read(sessionServiceProvider);
+                                  await sessionService.sftpDelete(
+                                      widget.sessionId, entry.path);
+                                  if (mounted) _loadDirectory(_currentPath);
+                                } catch (e) {
+                                  debugPrint('[FileManager] Delete failed: $e');
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Delete failed: $e')),
+                                    );
+                                  }
+                                }
                               },
                             );
                           },

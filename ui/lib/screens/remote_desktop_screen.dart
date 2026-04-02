@@ -119,18 +119,6 @@ class _RemoteDesktopScreenState extends ConsumerState<RemoteDesktopScreen> {
       });
     }
   }
-    });
-
-    if (_clipboardSync) {
-      _clipboardSub = sessionService.clipboardEvents
-          .where((e) => e.sessionId == widget.sessionId)
-          .listen((event) {
-        if (!mounted) return;
-        final text = String.fromCharCodes(event.data);
-        Clipboard.setData(ClipboardData(text: text));
-      });
-    }
-  }
 
   void _updateFrame(Map<String, dynamic> data) {
     final frameData = data['frame'] as Uint8List?;

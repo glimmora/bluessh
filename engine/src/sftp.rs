@@ -3,10 +3,11 @@
 //! Provides real file operations (list, upload, download, mkdir, delete, rename)
 //! over an SSH channel's SFTP subsystem.
 
+#![allow(dead_code, unused_mut)]
+
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{info, warn, error};
+use tracing::info;
 
 /// SFTP file entry returned by directory listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]

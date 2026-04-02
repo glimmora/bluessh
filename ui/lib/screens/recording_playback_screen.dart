@@ -116,8 +116,20 @@ class _RecordingPlaybackScreenState
 
     if (confirmed != true) return;
 
-    await File(recording.path).delete();
-    _loadRecordings();
+    try {
+      final file = File(recording.path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+      if (mounted) _loadRecordings();
+    } catch (e) {
+      debugPrint('[RecordingPlayback] Delete failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete recording: $e')),
+        );
+      }
+    }
   }
 
   String _formatSize(int bytes) {

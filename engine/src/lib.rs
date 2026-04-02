@@ -1265,7 +1265,7 @@ mod jni_exports {
     /// JNI wrapper: writes data to a session channel.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeWrite(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         session_id: jlong,
         data: JByteArray,
@@ -1645,7 +1645,7 @@ mod jni_exports {
     /// JNI wrapper: returns the current session state as a JSON string.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeGetSessionState(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
         session_id: jlong,
     ) -> jstring {
@@ -1662,7 +1662,7 @@ mod jni_exports {
     /// JNI wrapper: returns the engine package version string.
     #[no_mangle]
     pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeGetVersion(
-        env: JNIEnv,
+        mut env: JNIEnv,
         _class: JClass,
     ) -> jstring {
         let version = env!("CARGO_PKG_VERSION");
