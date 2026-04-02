@@ -191,7 +191,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       switch (profile.protocol) {
         case ProtocolType.ssh:
         case ProtocolType.sftp:
-          screen = MultiTerminalScreen(profile: profile);
+          screen = MultiTerminalScreen(
+            profile: profile,
+            existingSessionId: sessionId,
+          );
         case ProtocolType.vnc:
         case ProtocolType.rdp:
           screen = RemoteDesktopScreen(

@@ -69,7 +69,7 @@ class SessionState {
     return SessionState(
       sessionId: sessionId ?? this.sessionId,
       status: status ?? this.status,
-      errorMessage: errorMessage,
+      errorMessage: errorMessage ?? this.errorMessage,
       reconnectAttempts: reconnectAttempts ?? this.reconnectAttempts,
       connectedAt: connectedAt ?? this.connectedAt,
       latency: latency ?? this.latency,

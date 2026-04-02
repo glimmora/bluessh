@@ -165,7 +165,7 @@ void main() {
       final json = {
         'id': '789',
         'name': 'Minimal',
-        host: 'host',
+        'host': 'host',
         'port': 22,
         'protocol': 0,
         'username': 'user',
@@ -288,11 +288,14 @@ void main() {
 
     test('TransferProgress calculates progress', () {
       final transfer = TransferProgress(
+        id: '1',
         fileName: 'test.txt',
+        remotePath: '/remote/test.txt',
+        localPath: '/local/test.txt',
         totalBytes: 1000,
         transferredBytes: 500,
+        speedBps: 1024,
         isUpload: true,
-        startTime: DateTime.now().subtract(const Duration(seconds: 1)),
       );
 
       expect(transfer.progress, 0.5);
@@ -302,11 +305,14 @@ void main() {
 
     test('TransferProgress detects completion', () {
       final transfer = TransferProgress(
+        id: '2',
         fileName: 'test.txt',
+        remotePath: '/remote/test.txt',
+        localPath: '/local/test.txt',
         totalBytes: 1000,
         transferredBytes: 1000,
+        speedBps: 2048,
         isUpload: false,
-        startTime: DateTime.now(),
       );
 
       expect(transfer.progress, 1.0);
@@ -315,11 +321,45 @@ void main() {
 
     test('TransferProgress handles zero total', () {
       final transfer = TransferProgress(
+        id: '3',
         fileName: 'empty.txt',
+        remotePath: '/remote/empty.txt',
+        localPath: '/local/empty.txt',
         totalBytes: 0,
         transferredBytes: 0,
+        speedBps: 0,
         isUpload: true,
-        startTime: DateTime.now(),
+      );
+
+      expect(transfer.progress, 0.0);
+    });
+
+    test('TransferProgress detects completion', () {
+      final transfer = TransferProgress(
+        id: '2',
+        fileName: 'test.txt',
+        remotePath: '/remote/test.txt',
+        localPath: '/local/test.txt',
+        totalBytes: 1000,
+        transferredBytes: 1000,
+        speedBps: 2048,
+        isUpload: false,
+      );
+
+      expect(transfer.progress, 1.0);
+      expect(transfer.isComplete, true);
+    });
+
+    test('TransferProgress handles zero total', () {
+      final transfer = TransferProgress(
+        id: '3',
+        fileName: 'empty.txt',
+        remotePath: '/remote/empty.txt',
+        localPath: '/local/empty.txt',
+        totalBytes: 0,
+        transferredBytes: 0,
+        speedBps: 0,
+        isUpload: true,
       );
 
       expect(transfer.progress, 0.0);
@@ -331,7 +371,7 @@ void main() {
         path: '/home/user/bigfile.bin',
         size: 1048576,
         isDirectory: false,
-        permissions: 'rw-r--r--',
+        permissions: 420,
         modifiedTime: DateTime(2026, 3, 15),
       );
 
@@ -344,7 +384,7 @@ void main() {
         path: '/small.txt',
         size: 512,
         isDirectory: false,
-        permissions: 'rw-r--r--',
+        permissions: 420,
       );
 
       expect(file.sizeText, '512 B');
@@ -356,7 +396,7 @@ void main() {
         path: '/docs',
         size: 4096,
         isDirectory: true,
-        permissions: 'rwxr-xr-x',
+        permissions: 493,
       );
 
       expect(dir.sizeText, '-');

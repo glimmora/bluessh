@@ -353,7 +353,10 @@ class _FileManagerScreenState extends ConsumerState<FileManagerScreen> {
           ? _currentPath.substring(0, _currentPath.length - 1)
           : _currentPath;
       final lastSlash = parentPath.lastIndexOf('/');
-      final newPath = '${parentPath.substring(0, lastSlash + 1)}${newName.trim()}';
+      final basePath = lastSlash >= 0
+          ? parentPath.substring(0, lastSlash + 1)
+          : '/';
+      final newPath = '$basePath${newName.trim()}';
 
       final sessionService = ref.read(sessionServiceProvider);
       await sessionService.sftpRename(widget.sessionId, entry.path, newPath);

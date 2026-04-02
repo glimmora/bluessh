@@ -1,12 +1,16 @@
 package com.bluessh.bluessh
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Bridge between Flutter UI and the native Rust engine via JNI.
@@ -26,10 +30,22 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
     companion object {
         private const val CHANNEL_NAME = "com.bluessh/engine"
         private const val TAG = "EngineBridge"
+        private const val POLL_INTERVAL_MS = 50L
+        private const val READ_BUFFER_SIZE = 65536
 
         /** True if the native library loaded successfully. */
         var isLoaded: Boolean = false
             private set
+
+        /** Active channel instance for pushing events to Flutter. */
+        private var activeChannel: MethodChannel? = null
+
+        /** Polling thread for reading terminal data from engine. */
+        private var pollThread: Thread? = null
+        private val pollRunning = AtomicBoolean(false)
+
+        /** Set of active session IDs that need polling. */
+        private val activeSessions = ConcurrentHashMap.newKeySet<Long>()
 
         init {
             try {
@@ -51,11 +67,79 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
                 flutterEngine.dartExecutor.binaryMessenger,
                 CHANNEL_NAME
             )
+            activeChannel = channel
             channel.setMethodCallHandler(EngineBridge(context))
+            startPolling()
         }
+
+        /** Starts the background polling thread that reads terminal data from engine. */
+        private fun startPolling() {
+            if (pollRunning.getAndSet(true)) return
+            pollThread = Thread {
+                val buffer = ByteArray(READ_BUFFER_SIZE)
+                val handler = Handler(Looper.getMainLooper())
+                while (pollRunning.get()) {
+                    if (activeSessions.isEmpty()) {
+                        try { Thread.sleep(POLL_INTERVAL_MS * 4) } catch (_: InterruptedException) { break }
+                        continue
+                    }
+                    for (sessionId in activeSessions.toList()) {
+                        try {
+                            val bytesRead = nativeReadEvents(sessionId, buffer)
+                            if (bytesRead > 0) {
+                                val data = buffer.copyOf(bytesRead)
+                                handler.post {
+                                    activeChannel?.invokeMethod("onTerminalData", mapOf(
+                                        "sessionId" to sessionId,
+                                        "data" to data
+                                    ))
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error reading events for session $sessionId: ${e.message}")
+                        }
+                    }
+                    try { Thread.sleep(POLL_INTERVAL_MS) } catch (_: InterruptedException) { break }
+                }
+            }.apply {
+                name = "bluessh-engine-poll"
+                isDaemon = true
+                start()
+            }
+            Log.i(TAG, "Event polling thread started")
+        }
+
+        /** Stops the background polling thread. */
+        fun stopPolling() {
+            pollRunning.set(false)
+            pollThread?.interrupt()
+            pollThread?.join(1000)
+            pollThread = null
+            Log.i(TAG, "Event polling thread stopped")
+        }
+
+        /** Registers a session ID for event polling. */
+        fun registerSession(sessionId: Long) {
+            activeSessions.add(sessionId)
+        }
+
+        /** Unregisters a session ID from event polling. */
+        fun unregisterSession(sessionId: Long) {
+            activeSessions.remove(sessionId)
+        }
+
+        // ─── JNI Native Declarations (companion object / static) ──────
+        // nativeReadEvents is called from the companion object's polling thread
+
+        /**
+         * Reads pending terminal data from the engine for the given session.
+         * @return Number of bytes written to buffer, or 0 if no data, -1 on error.
+         */
+        @JvmStatic
+        private external fun nativeReadEvents(sessionId: Long, buffer: ByteArray): Int
     }
 
-    // ─── JNI Native Declarations ──────────────────────────────────────
+    // ─── JNI Native Declarations (instance methods) ───────────────────
     // Each corresponds to a Java_com_bluessh_bluessh_EngineBridge_native*
     // function exported by the Rust engine.
 
@@ -180,6 +264,9 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
                         call.argument<Boolean>("recordSession") ?: false,
                         call.argument<String>("username") ?: ""
                     )
+                    if (sessionId > 0) {
+                        registerSession(sessionId)
+                    }
                     result.success(sessionId)
                 }
                 "disconnect" -> {
@@ -188,6 +275,7 @@ class EngineBridge(private val context: Context) : MethodCallHandler {
                         result.error("INVALID_INPUT", "Session ID required", null)
                         return
                     }
+                    unregisterSession(sid)
                     result.success(nativeDisconnect(sid))
                 }
                 "write" -> {

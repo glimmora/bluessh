@@ -2,6 +2,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:xterm/xterm.dart';
@@ -38,6 +39,31 @@ class TabManager extends ChangeNotifier {
       throw Exception('Authentication failed');
     }
 
+    return _createTerminalTab(
+      sessionId: sessionId,
+      profile: profile,
+      sessionService: sessionService,
+    );
+  }
+
+  /// Creates a new tab using an already-authenticated session.
+  Future<TerminalTab> createTabWithExistingSession({
+    required int sessionId,
+    required HostProfile profile,
+    required SessionService sessionService,
+  }) async {
+    return _createTerminalTab(
+      sessionId: sessionId,
+      profile: profile,
+      sessionService: sessionService,
+    );
+  }
+
+  Future<TerminalTab> _createTerminalTab({
+    required int sessionId,
+    required HostProfile profile,
+    required SessionService sessionService,
+  }) async {
     final tab = TerminalTab(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       title: profile.name,
@@ -47,9 +73,8 @@ class TabManager extends ChangeNotifier {
       controller: TerminalController(),
     );
 
-    // Wire up terminal I/O
     tab.terminal.onOutput = (data) {
-      final bytes = Uint8List.fromList(data.codeUnits);
+      final bytes = Uint8List.fromList(utf8.encode(data));
       sessionService.write(sessionId, bytes);
     };
 
@@ -57,11 +82,10 @@ class TabManager extends ChangeNotifier {
       sessionService.resize(sessionId, width, height);
     };
 
-    // Listen for incoming data
     tab.dataSubscription = sessionService.terminalData
         .where((e) => e.sessionId == sessionId)
         .listen((event) {
-      final text = String.fromCharCodes(event.data);
+      final text = utf8.decode(event.data, allowMalformed: true);
       tab.terminal.write(text);
     });
 
@@ -83,6 +107,7 @@ class TabManager extends ChangeNotifier {
     if (index < 0 || index >= _tabs.length) return;
 
     final tab = _tabs[index];
+    tab.dispose();
     await sessionService.disconnect(tab.sessionId);
     _tabs.removeAt(index);
 
@@ -94,9 +119,10 @@ class TabManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Closes all tabs.
+  /// Closes all tabs and disconnects all sessions.
   Future<void> closeAll(SessionService sessionService) async {
     for (final tab in _tabs) {
+      tab.dispose();
       await sessionService.disconnect(tab.sessionId);
     }
     _tabs.clear();

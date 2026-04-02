@@ -1674,4 +1674,53 @@ mod jni_exports {
             }
         }
     }
+
+    /// JNI wrapper: reads pending terminal data from a session.
+    ///
+    /// Returns the number of bytes written to the buffer, 0 if no data,
+    /// or -1 on error. This is the Android equivalent of `engine_read`.
+    #[no_mangle]
+    pub unsafe extern "C" fn Java_com_bluessh_bluessh_EngineBridge_nativeReadEvents(
+        env: JNIEnv,
+        _class: JClass,
+        session_id: jlong,
+        buffer: JByteArray,
+    ) -> jint {
+        let state = match engine().read() {
+            Ok(s) => s,
+            Err(_) => return -1,
+        };
+
+        if let Some(session) = state.sessions.get(&(session_id as SessionId)) {
+            if let Some(ref event_rx) = session.event_rx {
+                let rx = match event_rx.lock() {
+                    Ok(r) => r,
+                    Err(_) => return -1,
+                };
+                match rx.try_recv() {
+                    Ok(ssh_session::SessionEvent::Data(data)) => {
+                        let buf_len = match env.get_array_length(&buffer) {
+                            Ok(l) => l as usize,
+                            Err(_) => return -1,
+                        };
+                        let copy_len = data.len().min(buf_len);
+                        let java_bytes = &data[..copy_len];
+                        match env.set_byte_array_region(&buffer, 0, unsafe {
+                            std::mem::transmute(java_bytes)
+                        }) {
+                            Ok(()) => copy_len as jint,
+                            Err(_) => -1,
+                        }
+                    }
+                    Ok(_) => 0,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => 0,
+                    Err(_) => -1,
+                }
+            } else {
+                0
+            }
+        } else {
+            -1
+        }
+    }
 }

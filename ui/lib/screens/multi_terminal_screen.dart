@@ -13,8 +13,13 @@ import '../services/tab_manager.dart';
 
 class MultiTerminalScreen extends ConsumerStatefulWidget {
   final HostProfile profile;
+  final int? existingSessionId;
 
-  const MultiTerminalScreen({super.key, required this.profile});
+  const MultiTerminalScreen({
+    super.key,
+    required this.profile,
+    this.existingSessionId,
+  });
 
   @override
   ConsumerState<MultiTerminalScreen> createState() =>
@@ -36,10 +41,19 @@ class _MultiTerminalScreenState extends ConsumerState<MultiTerminalScreen> {
     setState(() => _connecting = true);
     final sessionService = ref.read(sessionServiceProvider);
     try {
-      await _tabManager.createTab(
-        profile: widget.profile,
-        sessionService: sessionService,
-      );
+      if (widget.existingSessionId != null && widget.existingSessionId! > 0) {
+        // Reuse the already-authenticated session from home_screen
+        await _tabManager.createTabWithExistingSession(
+          sessionId: widget.existingSessionId!,
+          profile: widget.profile,
+          sessionService: sessionService,
+        );
+      } else {
+        await _tabManager.createTab(
+          profile: widget.profile,
+          sessionService: sessionService,
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
