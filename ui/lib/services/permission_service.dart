@@ -34,21 +34,15 @@ class PermissionService {
   ///
   /// - [Permission.notification] — needed on Android 13+ (API 33) for the
   ///   foreground service notification that keeps the session alive.
-  /// - [Permission.storage] — needed on Android < 11 for SFTP file
-  ///   downloads/uploads. On Android 11+ this uses MediaStore / SAF.
   static List<Permission> get _connectionPermissions {
     if (!Platform.isAndroid) return [];
-    return [
-      Permission.notification,
-    ];
+    return [Permission.notification];
   }
 
   /// Permissions needed for SFTP file operations.
   static List<Permission> get _storagePermissions {
     if (!Platform.isAndroid) return [];
-    return [
-      Permission.storage,
-    ];
+    return [Permission.storage];
   }
 
   /// Checks whether all connection-critical permissions are already granted.
@@ -85,6 +79,21 @@ class PermissionService {
     final permanentlyDenied = <Permission>[];
 
     for (final perm in permissions) {
+      // Check current status first — skip if already granted
+      final currentStatus = await perm.status;
+      if (currentStatus.isGranted || currentStatus.isLimited) {
+        statuses[perm] = currentStatus;
+        continue;
+      }
+
+      // If permanently denied, go straight to settings
+      if (currentStatus.isPermanentlyDenied) {
+        permanentlyDenied.add(perm);
+        statuses[perm] = currentStatus;
+        continue;
+      }
+
+      // Request the permission
       final status = await perm.request();
       statuses[perm] = status;
 
@@ -136,6 +145,12 @@ class PermissionService {
     final permanentlyDenied = <Permission>[];
 
     for (final perm in permissions) {
+      final currentStatus = await perm.status;
+      if (currentStatus.isGranted || currentStatus.isLimited) {
+        statuses[perm] = currentStatus;
+        continue;
+      }
+
       final status = await perm.request();
       statuses[perm] = status;
       if (status.isPermanentlyDenied) {
