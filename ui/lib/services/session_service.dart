@@ -160,37 +160,6 @@ class SessionService {
       }
     });
   }
-            break;
-          case 'onSftpProgress':
-            _sftpController.add(SftpEvent.fromJson(args));
-            break;
-          case 'onClipboardUpdate':
-            final sessionId = (args['sessionId'] as num?)?.toInt() ?? 0;
-            final data = args['data'] as Uint8List?;
-            if (data != null) {
-              _clipboardController.add(ClipboardEvent(
-                sessionId: sessionId,
-                data: data,
-              ));
-            }
-            break;
-          case 'onAuthChallenge':
-            final sessionId = (args['sessionId'] as num?)?.toInt() ?? 0;
-            final methodsList = args['methods'];
-            final methods = methodsList is List
-                ? methodsList.map((e) => e.toString()).toList()
-                : <String>[];
-            _authController.add(AuthEvent(
-              sessionId: sessionId,
-              methods: methods,
-            ));
-            break;
-        }
-      } catch (e) {
-        debugPrint('[SessionService] Callback handler error: $e');
-      }
-    });
-  }
 
   // ── Connection lifecycle ───────────────────────────────────────
 
@@ -720,16 +689,6 @@ class SftpEvent {
     if (json == null) {
       return const SftpEvent(sessionId: 0, type: 'unknown');
     }
-    final map = json as Map<dynamic, dynamic>;
-    return SftpEvent(
-      sessionId: (map['sessionId'] as num?)?.toInt() ?? 0,
-      type: (map['type'] as String?) ?? 'unknown',
-      fileId: (map['fileId'] as num?)?.toInt() ?? 0,
-      bytesTransferred: (map['bytesTransferred'] as num?)?.toInt() ?? 0,
-      totalBytes: (map['totalBytes'] as num?)?.toInt() ?? 0,
-      speedBps: (map['speedBps'] as num?)?.toInt() ?? 0,
-    );
-  }
     final map = json as Map<dynamic, dynamic>;
     return SftpEvent(
       sessionId: (map['sessionId'] as num?)?.toInt() ?? 0,

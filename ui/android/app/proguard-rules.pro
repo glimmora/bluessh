@@ -67,6 +67,16 @@
 -dontwarn okio.**
 -dontwarn javax.annotation.**
 -dontwarn org.conscrypt.**
+-dontwarn com.google.android.play.core.**
+
+# Flutter Play Store split/deferred components — optional at runtime
+-keep class io.flutter.embedding.engine.deferredcomponents.** { *; }
+-keep class io.flutter.embedding.android.FlutterPlayStoreSplitApplication { *; }
+
+# Flutter Play Store split/deferred components — optional at runtime
+-keep class io.flutter.embedding.engine.deferredcomponents.** { *; }
+-keep class io.flutter.embedding.android.FlutterPlayStoreSplitApplication { *; }
+-dontwarn com.google.android.play.core.**
 
 # Keep attributes for debugging
 -keepattributes SourceFile,LineNumberTable

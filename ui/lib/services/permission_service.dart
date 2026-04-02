@@ -7,7 +7,6 @@
 library;
 
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 /// Result of a permission request batch.
