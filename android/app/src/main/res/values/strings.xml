@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BlueSSH</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_search">Search</string>
+    <string name="action_key_management">Key Management</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="action_record">Record Session</string>
+    <string name="action_stop_record">Stop Recording</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_paste">Paste</string>
+    <string name="action_new_connection">New Connection</string>
+    <string name="action_quick_connect">Quick Connect</string>
+    <string name="action_new_tab">New Tab</string>
+    <string name="action_close_tab">Close Tab</string>
+    <string name="action_fullscreen">Fullscreen</string>
+    <string name="action_port_forwarding">Port Forwarding</string>
+    <string name="action_sftp">SFTP File Manager</string>
+    
+    <!-- Host Profile -->
+    <string name="host_profile_name">Profile Name</string>
+    <string name="host_profile_host">Host</string>
+    <string name="host_profile_port">Port</string>
+    <string name="host_profile_username">Username</string>
+    <string name="host_profile_password">Password</string>
+    <string name="host_profile_key">SSH Key</string>
+    <string name="host_profile_passphrase">Key Passphrase</string>
+    <string name="host_profile_auth_method">Authentication Method</string>
+    <string name="host_profile_compression">Compression Level</string>
+    <string name="host_profile_mfa_secret">MFA Secret</string>
+    <string name="host_profile_tags">Tags</string>
+    <string name="host_profile_jump_host">Jump Host</string>
+    <string name="host_profile_environment">Environment Variables</string>
+    <string name="host_profile_working_directory">Working Directory</string>
+    <string name="host_profile_agent_forwarding">Agent Forwarding</string>
+    <string name="host_profile_x11_forwarding">X11 Forwarding</string>
+    <string name="host_profile_recording">Enable Recording</string>
+    <string name="host_profile_keepalive">Keepalive Interval</string>
+    <string name="host_profile_reconnect">Max Reconnect Attempts</string>
+    <string name="host_profile_timeout">Connection Timeout</string>
+    
+    <!-- Settings -->
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_auto">Auto (System)</string>
+    <string name="settings_terminal_font_size">Terminal Font Size</string>
+    <string name="settings_terminal_theme">Terminal Theme</string>
+    <string name="settings_terminal_scrollback">Scrollback Buffer Size</string>
+    <string name="settings_terminal_timestamps">Show Timestamps</string>
+    <string name="settings_terminal_bell">Enable Bell</string>
+    <string name="settings_terminal_cursor">Cursor Style</string>
+    <string name="settings_terminal_cursor_blink">Cursor Blink</string>
+    <string name="settings_compression_default">Default Compression</string>
+    <string name="settings_keepalive_default">Default Keepalive</string>
+    <string name="settings_reconnect_default">Default Reconnect Attempts</string>
+    <string name="settings_record_by_default">Record by Default</string>
+    <string name="settings_clipboard_sync">Clipboard Sync</string>
+    <string name="settings_auto_save">Auto-save Sessions</string>
+    
+    <!-- SFTP -->
+    <string name="sftp_upload">Upload</string>
+    <string name="sftp_download">Download</string>
+    <string name="sftp_new_folder">New Folder</string>
+    <string name="sftp_rename">Rename</string>
+    <string name="sftp_delete">Delete</string>
+    <string name="sftp_refresh">Refresh</string>
+    <string name="sftp_permissions">Permissions</string>
+    <string name="sftp_transfer_progress">Transfer Progress</string>
+    
+    <!-- Port Forwarding -->
+    <string name="forwarding_local">Local Forwarding</string>
+    <string name="forwarding_remote">Remote Forwarding</string>
+    <string name="forwarding_dynamic">Dynamic (SOCKS5)</string>
+    <string name="forwarding_add_rule">Add Rule</string>
+    <string name="forwarding_remove_rule">Remove Rule</string>
+    <string name="forwarding_enable_rule">Enable Rule</string>
+    <string name="forwarding_disable_rule">Disable Rule</string>
+    
+    <!-- Key Management -->
+    <string name="key_generate">Generate Key</string>
+    <string name="key_import">Import Key</string>
+    <string name="key_delete">Delete Key</string>
+    <string name="key_type">Key Type</string>
+    <string name="key_size">Key Size</string>
+    <string name="key_fingerprint">Fingerprint</string>
+    <string name="key_passphrase">Passphrase</string>
+    
+    <!-- Messages -->
+    <string name="msg_connecting">Connecting to %1$s:%2$d…</string>
+    <string name="msg_connected">Connected to %1$s</string>
+    <string name="msg_disconnected">Disconnected</string>
+    <string name="msg_authenticating">Authenticating…</string>
+    <string name="msg_connection_failed">Connection failed: %1$s</string>
+    <string name="msg_auth_failed">Authentication failed</string>
+    <string name="msg_recording_started">Recording started</string>
+    <string name="msg_recording_stopped">Recording stopped</string>
+    <string name="msg_key_generated">Key generated successfully</string>
+    <string name="msg_key_imported">Key imported successfully</string>
+    <string name="msg_key_deleted">Key deleted</string>
+    <string name="msg_file_uploaded">File uploaded: %1$s</string>
+    <string name="msg_file_downloaded">File downloaded: %1$s</string>
+    <string name="msg_transfer_complete">Transfer complete</string>
+    <string name="msg_transfer_failed">Transfer failed: %1$s</string>
+    
+    <!-- Errors -->
+    <string name="error_connection_timeout">Connection timeout</string>
+    <string name="error_auth_failed">Authentication failed</string>
+    <string name="error_host_key">Host key verification failed</string>
+    <string name="error_network">Network error</string>
+    <string name="error_permission_denied">Permission denied</string>
+    <string name="error_file_not_found">File not found</string>
+    <string name="error_invalid_key">Invalid key file</string>
+    <string name="error_unknown">Unknown error</string>
+</resources>

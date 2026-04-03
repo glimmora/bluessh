@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary colors -->
+    <color name="primary">#4FC3F7</color>
+    <color name="primary_dark">#0288D1</color>
+    <color name="on_primary">#000000</color>
+    
+    <!-- Secondary colors -->
+    <color name="secondary">#81C784</color>
+    <color name="secondary_dark">#388E3C</color>
+    <color name="on_secondary">#000000</color>
+    
+    <!-- Background colors (Dark theme) -->
+    <color name="background">#0D1117</color>
+    <color name="surface">#21262D</color>
+    <color name="on_background">#C9D1D9</color>
+    <color name="on_surface">#C9D1D9</color>
+    <color name="window_background">#0D1117</color>
+    
+    <!-- Status bar -->
+    <color name="status_bar">#0D1117</color>
+    <color name="navigation_bar">#0D1117</color>
+    
+    <!-- Terminal colors -->
+    <color name="terminal_background">#1E1E1E</color>
+    <color name="terminal_foreground">#D4D4D4</color>
+    <color name="terminal_cursor">#4FC3F7</color>
+    <color name="terminal_selection">#264F78</color>
+    
+    <!-- Status colors -->
+    <color name="success">#4CAF50</color>
+    <color name="error">#F44336</color>
+    <color name="warning">#FF9800</color>
+    <color name="info">#2196F3</color>
+    
+    <!-- Card colors -->
+    <color name="card_background">#21262D</color>
+    <color name="card_border">#30363D</color>
+    
+    <!-- Text colors -->
+    <color name="text_primary">#C9D1D9</color>
+    <color name="text_secondary">#8B949E</color>
+    <color name="text_hint">#6E7681</color>
+</resources>
